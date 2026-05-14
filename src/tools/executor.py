@@ -56,25 +56,3 @@ class CodeExecutor:
             # 跑完一定要把临时文件删掉，保持整洁
             if os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
-
-# --- 简单测试逻辑 ---
-if __name__ == "__main__":
-    executor = CodeExecutor()
-    
-    # 测试代码：故意写错变量名
-    test_code = """
-def greet():
-    message = "Hello, LLM Code Medic!"
-    print(mesage) # 这里少写了一个 s
-
-greet()
-    """
-    
-    print("--- 正在运行测试代码 ---")
-    res = executor.run_code(test_code)
-    
-    if res["success"]:
-        print("运行成功！输出：", res["output"])
-    else:
-        print("捕获到报错！内容如下：\n")
-        print(res["error"])
