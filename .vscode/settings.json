@@ -1,0 +1,9 @@
+{
+    "VsCodeTaskButtons.tasks": [
+        {
+            "label": "一键修复",
+            "task": "run-python-main",
+            "tooltip": "在根目录下运行 python -m src.main"
+        }
+    ]
+}
