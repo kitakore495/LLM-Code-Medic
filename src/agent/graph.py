@@ -1,115 +1,196 @@
+# src/agent/graph.py
 import os
-from typing import TypedDict
-from langgraph.graph import StateGraph, END
+import re
+from typing import TypedDict, Dict, List, Annotated
+from langgraph.graph import StateGraph, END, START
+from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
-from src.tools.executor import CodeExecutor
+# 从项目本地模块导入组件
 from src.agent.prompts import DIAGNOSE_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT
+from src.tools.scanner import ProjectScanner
+from src.tools.executor import CodeExecutor
 
-# 1. 定义 V2 增强版状态结构
+# ==========================================
+# 1. 定义 V3 多文件协同状态机数据结构
+# ==========================================
 class AgentState(TypedDict):
-    code: str            # 待修复的代码
-    error_message: str   # executor 捕获的报错
-    analysis: str        # DeepSeek R1 的推理诊断报告
-    project_map: str     # ✨ V2 新增：ProjectScanner 扫出的项目全局地图背景
-    repo_root: str       # ✨ V2 新增：当前测试项目的根目录路径（用于跨文件执行环境切换）
-    attempts: int        # 当前重试次数
-    is_fixed: bool       # 是否修复成功的标志位
+    repo_root: str                  # 测试仓库的物理根目录
+    project_map: str                # AST 全景地图上下文
+    error_message: str              # 当前最新的集成测试报错信息
+    target_files: List[str]         # R1 诊断出本次需要连带修改的文件清单
+    repo_files: Dict[str, str]      # 整个仓库所有相关文件的最新代码映射 {相对路径: 代码内容}
+    attempts: int                   # 当前迭代重试次数
+    is_fixed: bool                  # 全物理闭环是否成功通关
+    analysis: str                   # R1 的根因分析思维链或文本
 
-# 2. 模型加载工厂 (保持硅基流动 DeepSeek 配置)
-def get_model(purpose: str):
-    # 诊断节点推荐用 R1 (强推理、会查阅地图连线)；修复节点用 V4-Flash / V3 (生成稳且快)
-    model_name = "Pro/deepseek-ai/DeepSeek-R1" if purpose == "diagnose" else "deepseek-ai/DeepSeek-V4-Flash"
+# ==========================================
+# 2. 核心节点流转逻辑定义
+# ==========================================
+
+def diagnose_node(state: AgentState) -> Dict:
+    """
+    [诊断节点] 调度 DeepSeek-R1 进行慢思考，找出导致 Bug 的多文件根因。
+    """
+    print(f"\n🚀 [Node: 诊断中...] 正在进行第 {state['attempts'] + 1} 次多文件联动诊断...")
     
-    return ChatOpenAI(
-        model=model_name,
-        openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
-        openai_api_base=os.getenv("DEEPSEEK_API_BASE"),
-        temperature=0.3 if purpose == "diagnose" else 0.7  # 诊断要求严谨，修复可以稍微灵活
-    )
-
-# --- 3. 智能体节点函数定义 ---
-
-def diagnose_node(state: AgentState):
-    print(f"🔎 [Node: Diagnose] 正在分析错误原因 (第 {state['attempts']+1} 次尝试)...")
-    model = get_model("diagnose")
-    
-    # ✨ 将项目地图作为上文喂给 R1，引导它去比对跨文件引用
-    prompt = (
-        f"【项目目录结构地图】:\n{state['project_map']}\n\n"
-        f"【当前报错文件的代码】:\n{state['code']}\n\n"
-        f"【运行报错信息】:\n{state['error_message']}"
+    # 🎯【核心修复】强行锁死 DeepSeek 凭证，不再受默认 OpenAI 占位符干扰
+    llm = ChatOpenAI(
+        model="Pro/deepseek-ai/DeepSeek-R1",
+        temperature=0.2,
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url=os.getenv("DEEPSEEK_API_BASE")
     )
     
-    response = model.invoke([
-        ("system", DIAGNOSE_SYSTEM_PROMPT),
-        ("user", prompt)
+    current_codes_context = "\n".join([
+        f"--- 文件路径: {path} ---\n{content}\n" 
+        for path, content in state["repo_files"].items()
     ])
-    return {"analysis": response.content}
-
-def repair_node(state: AgentState):
-    print("🛠️ [Node: Repair] 正在生成修复方案...")
-    model = get_model("repair")
     
-    # ✨ 修复节点同样带上地图背景，防止 Flash 乱改或瞎编 import 路径
-    prompt = (
-        f"【项目目录结构地图】:\n{state['project_map']}\n\n"
-        f"【原始代码】:\n{state['code']}\n\n"
-        f"【诊断报告】:\n{state['analysis']}"
-    )
+    user_content = f"""
+【当前测试仓库 AST 全景地图】:
+{state['project_map']}
+
+【当前仓库内各文件代码快照】:
+{current_codes_context}
+
+【全仓库联合测试最新报错 Traceback】:
+{state['error_message']}
+
+请帮我深度分析报错根因。并在输出的最后，明确列出你需要修改的文件相对路径清单，格式为: 
+TARGET_FILES: [文件1, 文件2]
+"""
+
+    messages = [
+        SystemMessage(content=DIAGNOSE_SYSTEM_PROMPT),
+        HumanMessage(content=user_content)
+    ]
     
-    response = model.invoke([
-        ("system", REPAIR_SYSTEM_PROMPT),
-        ("user", prompt)
-    ])
-    # 严格清理 Markdown 标签
-    new_code = response.content.replace("```python", "").replace("```", "").strip()
-    return {"code": new_code}
-
-def verify_node(state: AgentState):
-    print("🧪 [Node: Verify] 正在执行代码验证...")
-    executor = CodeExecutor()
+    response = llm.invoke(messages)
+    analysis_text = response.content
     
-    # ✨ V2 核心修正：运行验证时传入 repo_root，让执行器动态切换到 mock 文件夹下执行
-    result = executor.run_code(state["code"], repo_root=state.get("repo_root"))
+    # 使用正则表达式提取大模型指定的待修改文件清单
+    target_files = []
+    match = re.search(r"TARGET_FILES:\s*\[(.*?)\]", analysis_text)
+    if match:
+        target_files = [f.strip().strip("'\"") for f in match.group(1).split(",") if f.strip()]
     
-    if result["success"]:
-        print("✅ 修复成功！代码已可以正常运行。")
-        return {"is_fixed": True, "error_message": "", "attempts": state["attempts"] + 1}
-    else:
-        # ✨ 安全切片：防止 result["error"] 为空或无换行导致的 IndexError 崩溃
-        error_lines = result["error"].splitlines() if result["error"] else []
-        last_error = error_lines[-1] if error_lines else "Unknown Error"
-        print(f"❌ 依然存在错误：{last_error}")
-        return {"is_fixed": False, "error_message": result["error"], "attempts": state["attempts"] + 1}
+    if not target_files:
+        target_files = list(state["repo_files"].keys())
 
-# 4. 路由跳转控制
-def decide_to_continue(state: AgentState):
-    if state["is_fixed"]:
-        return "end"
-    if state["attempts"] >= 3:
-        print("⚠️ 已达到最大重试次数，修复终止。")
-        return "end"
-    return "continue"
-
-# 5. 组装 LangGraph 工作流图
-workflow = StateGraph(AgentState)
-
-workflow.add_node("diagnose", diagnose_node)
-workflow.add_node("repair", repair_node)
-workflow.add_node("verify", verify_node)
-
-workflow.set_entry_point("diagnose")
-workflow.add_edge("diagnose", "repair")
-workflow.add_edge("repair", "verify")
-
-workflow.add_conditional_edges(
-    "verify",
-    decide_to_continue,
-    {
-        "continue": "diagnose",
-        "end": END
+    print(f"🎯 [诊断完成] R1 锁定的联动修改目标文件: {target_files}")
+    
+    return {
+        "analysis": analysis_text,
+        "target_files": target_files,
+        "attempts": state["attempts"] + 1
     }
-)
 
-app = workflow.compile()
+
+def repair_node(state: AgentState) -> Dict:
+    """
+    [修复节点] 调度 DeepSeek V4 Flash 模块快速生成结构化多文件代码补丁。
+    """
+    print(f"🛠️ [Node: 修复中...] 正在针对目标文件生成联动补丁...")
+    
+    # 🎯【核心修复】同样锁死为当前的 DeepSeek 模型和变量通道
+    llm = ChatOpenAI(
+        model="deepseek-ai/DeepSeek-V4-Flash",
+        temperature=0.1,
+        api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url=os.getenv("DEEPSEEK_API_BASE")
+    )
+    
+    user_content = f"""
+【R1 导师给出的根因诊断报告】:
+{state['analysis']}
+
+【你本次必须修改的文件清单】:
+{state['target_files']}
+
+请严格按照 V3 多文件协议协议，同时输出这些文件修改后的【全量内容】。
+"""
+
+    messages = [
+        SystemMessage(content=REPAIR_SYSTEM_PROMPT),
+        HumanMessage(content=user_content)
+    ]
+    
+    response = llm.invoke(messages)
+    reply = response.content
+    
+    pattern = r"<<<FILE_PATH:\s*(.*?)\s*>>>(.*?)(?=<<<FILE_END>>>)"
+    matches = re.findall(pattern, reply, re.DOTALL)
+    
+    updated_repo_files = state["repo_files"].copy()
+    
+    if matches:
+        print(f"📝 成功解析到大模型吐出的多文件补丁包：")
+        for file_path, code_content in matches:
+            file_path = file_path.strip()
+            clean_code = code_content.strip()
+            if clean_code.startswith("```python"):
+                clean_code = clean_code[9:]
+            if clean_code.endswith("```"):
+                clean_code = clean_code[:-3]
+            clean_code = clean_code.strip()
+            
+            updated_repo_files[file_path] = clean_code
+            print(f"   -> 已在内存中装配补丁: {file_path} ({len(clean_code)} 字节)")
+    else:
+        print("⚠️ 警告: 未能通过强规则解析到结构化多文件补丁，保持原代码不变。")
+
+    return {"repo_files": updated_repo_files}
+
+
+def verify_node(state: AgentState) -> Dict:
+    """
+    [验证节点] 将内存中打好补丁的多文件全量写入物理磁盘，并调用沙箱进行全项目集成测试。
+    """
+    print(f"🧪 [Node: 验证中...] 开启多文件全项目集成编译与沙箱测试...")
+    
+    executor = CodeExecutor(repo_root=state["repo_root"])
+    success, current_error = executor.run_v3_validation(state["repo_files"])
+    
+    if success:
+        print("🎉【完美通关】全项目联合测试 100% 运行成功！Bug 已被彻底消灭！")
+        return {"is_fixed": True, "error_message": ""}
+    else:
+        print(f"❌ 测试未通过，沙箱捕获到全新报错。已自动执行物理原子回滚。")
+        return {"is_fixed": False, "error_message": current_error}
+
+# ==========================================
+# 3. 动态控制流转路由定义（有向图条件边）
+# ==========================================
+def should_continue(state: AgentState):
+    if state["is_fixed"]:
+        return END
+    if state["attempts"] >= 3:
+        print("\n🚨 [达最大重试上限] 连续 3 次多文件连环修复均未成功，策略中断，抱憾收工。")
+        return END
+    return "diagnose"
+
+# ==========================================
+# 4. 构建 LangGraph 状态机拓扑网络
+# ==========================================
+def create_v3_medic_graph():
+    workflow = StateGraph(AgentState)
+    
+    workflow.add_node("diagnose", diagnose_node)
+    workflow.add_node("repair", repair_node)
+    workflow.add_node("verify", verify_node)
+    
+    workflow.add_edge(START, "diagnose")
+    workflow.add_edge("diagnose", "repair")
+    workflow.add_edge("repair", "verify")
+    
+    workflow.add_conditional_edges(
+        "verify",
+        should_continue,
+        {
+            "diagnose": "diagnose",
+            END: END
+        }
+    )
+    
+    return workflow.compile()

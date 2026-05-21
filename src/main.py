@@ -1,92 +1,84 @@
 import os
-import time
-from dotenv import load_dotenv
-from src.agent.graph import app
-from src.tools.executor import CodeExecutor
-from src.tools.scanner import ProjectScanner  # ✨ V2 引入全景扫描器
+import sys
+from dotenv import load_dotenv  # 👈 【核心修复】引入全局环境加载器
 
+# 👈 【核心修复】必须在程序刚刚启动的第一秒，强行把全局 .env 文件读取进内存
 load_dotenv()
 
-def run_medic(file_path, repo_root=None):
-    """
-    file_path: 发生报错的目标文件路径
-    repo_root: 项目根目录。
-               - 测 V1 单文件时传 None
-               - 测 V2 仓库级 Bug 时传入对应的测试目录，如 "tests/v2_repo_case"
-    """
-    print(f"🚀 [Start] 准备修复文件: {file_path}")
-    
-    # 1. 检查并读取目标文件源码
-    if not os.path.exists(file_path):
-        print(f"❌ 错误：找不到文件 {file_path}")
+# 将项目根目录加入环境变量，防止组件导入迷路
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.agent.graph import create_v3_medic_graph
+from src.tools.scanner import ProjectScanner
+
+def main():
+    print("==================================================")
+    # 🎯 ✅ 组长请锁定：路径已物理对齐到全新的 tests/v3 战区
+    TEST_REPO_ROOT = os.path.abspath("./tests/v3") 
+    print(f"🎬 启动 LLM-Code-Medic V3 多文件智能协同修复系统...")
+    print(f"📂 当前目标测试仓库: {TEST_REPO_ROOT}")
+    print("==================================================")
+
+    if not os.path.exists(TEST_REPO_ROOT):
+        print(f"❌ 错误: 未找到测试仓库路径 {TEST_REPO_ROOT}，请检查目录结构！")
         return
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        code = f.read()
+    # 1. 启动静态雷达：调用 Scanner 自动绘制项目全景 AST 地图
+    print("\n[Step 1] 正在启动 AST 静态扫描器绘制全景地图...")
+    scanner = ProjectScanner(repo_root=TEST_REPO_ROOT)
+    project_map_context = scanner.scan() 
+    print("✅ 全景地图绘制完毕。")
 
-    # 2. 预运行一次，拿到初始报错环境
-    print("🧪 正在进行初始运行以获取报错信息...")
-    executor = CodeExecutor()
-    # 初始预运行同样需要切入对应的仓库目录下，否则第一轮获取的报错可能不准
-    initial_run = executor.run_code(code, repo_root=repo_root)
+    # 2. 灵魂装配: 扫描并读取测试仓库里所有 Python 文件的初始全量代码
+    print("\n[Step 2] 正在将测试仓库所有初始源码装载进 V3 状态机内存...")
+    initial_repo_files = {}
     
-    if initial_run["success"]:
-        print("✅ 代码本身没问题，不需要修复！")
-        return
+    for root, _, files in os.walk(TEST_REPO_ROOT):
+        for file in files:
+            if file.endswith(".py"):
+                full_path = os.path.join(root, file)
+                # 计算出相对路径，例如 "main.py" 或 "utils.py"
+                rel_path = os.path.relpath(full_path, TEST_REPO_ROOT)
+                
+                with open(full_path, "r", encoding="utf-8") as f:
+                    initial_repo_files[rel_path] = f.read()
+                    print(f"   -> 已装载初始文件快照: {rel_path}")
 
-    # ✨ 3. V2 核心：如果指定了仓库根目录，进行全局扫描
-    if repo_root and os.path.exists(repo_root):
-        print(f"📂 检测到仓库模式，正在扫描全局项目结构: {repo_root} ...")
-        scanner = ProjectScanner(root_path=repo_root)
-        project_map = scanner.scan_structure()
-        print("====== 项目目录结构地图 ======")
-        print(project_map)
-        print("==================================")
-    else:
-        project_map = f"单文件模式，无全局上下文。当前文件: {os.path.basename(file_path)}"
+    # 3. 构造第一次运行的初始报错信息，作为引子喂给 R1
+    INITIAL_ERROR = """
+Traceback (most recent call last):
+  File "main.py", line 11, in run_pipeline
+    result = utils.compute_core_logic(input_data)
+AttributeError: module 'utils' has no attribute 'compute_core_logic'
+"""
 
-    # 4. 初始化 LangGraph 状态（注入 V2 的 project_map 与 repo_root 变量）
+    # 4. 初始化 V3 状态机参数
     initial_state = {
-        "code": code,
-        "error_message": initial_run["error"],
-        "project_map": project_map,  # 给 AI 充当背景画布
-        "repo_root": repo_root,      # 给验证节点切换运行目录
-        "analysis": "",
+        "repo_root": TEST_REPO_ROOT,
+        "project_map": project_map_context,
+        "error_message": INITIAL_ERROR.strip(),
+        "target_files": [],
+        "repo_files": initial_repo_files,
         "attempts": 0,
-        "is_fixed": False
+        "is_fixed": False,
+        "analysis": ""
     }
 
-    # 5. 启动智能体流转
-    final_state = app.invoke(initial_state, {"recursion_limit": 20})
+    # 5. 构建并编译 LangGraph 拓扑网
+    print("\n[Step 3] 正在编译 LangGraph 多文件有向图工作流...")
+    v3_app = create_v3_medic_graph()
 
-    # 6. 结果产出与保存
+    # 6. 一脚油门，流转通电！
+    print("\n[Step 4] 🚀 智能体正式具身合流，开始全自动多文件联合审计与测试...")
+    final_state = v3_app.invoke(initial_state)
+
+    print("\n==================================================")
     if final_state.get("is_fixed"):
-        print("\n" + "="*30)
-        print("🎉 修复完成！")
-        print("="*30)
-
-        if not os.path.exists("output"):
-            os.makedirs("output")
-
-        file_name = os.path.basename(file_path)
-        output_path = os.path.join("output", f"fixed_{file_name}")
-
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(final_state["code"])
-
-        print(f"✅ 修复后的代码已成功保存至: {output_path}")
-        print("-" * 30)
-        print(final_state["code"])
+        print("🎉【大获全胜】V3 智能体成功在 3 轮内完成了多文件协同修复！")
+        print("💡 修复后的全量代码已安全驻留在磁盘测试目录中。")
     else:
-        print("\n❌ 修复失败，已达到重试上限。")
+        print("🚨【遗憾收工】未能完成修复，请检查大模型提示词约束或测试仓库复杂度。")
+    print("==================================================")
 
 if __name__ == "__main__":
-    # ====================================================
-    # 💡 组长专用灰度测试开关：
-    # ====================================================
-    
-    # 【测试场景 A】：复现和验证老版本的 V1 单文件修复能力
-    # run_medic("tests/v1_single_file/debug_me.py", repo_root=None)
-    
-    # 【测试场景 B】：震撼跑通 V2 仓库级跨文件 Bug 修复能力
-    run_medic("tests/v2_repo_case/main.py", repo_root="tests/v2_repo_case")
+    main()

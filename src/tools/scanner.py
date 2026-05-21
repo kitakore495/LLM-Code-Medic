@@ -1,13 +1,13 @@
+# src/tools/scanner.py
 import os
 import ast
 
 class ProjectScanner:
-    def __init__(self, root_path="."):
-        self.root_path = root_path
+    def __init__(self, repo_root="."):  # 👈 【修复】将 root_path 统一对齐为 repo_root
+        self.repo_root = os.path.abspath(repo_root)
         self.ignore_list = {
             ".git", "__pycache__", ".venv", "venv", 
             "output", ".env", ".vscode", ".pytest_cache" 
-            # ❌ 删除了 "tests"，这样指定扫描 tests/v2_repo_case 时才不会被拦截
         }
 
     def _get_py_info(self, file_path):
@@ -28,19 +28,19 @@ class ProjectScanner:
         except Exception:
             return " (parse error)"
 
-    def scan_structure(self):
+    def scan(self) -> str:  # 👈 【修复】将方法名从 scan_structure 改为 scan，完美对齐 main.py
         """生成增强版的项目目录树结构"""
         tree = []
-        for root, dirs, files in os.walk(self.root_path):
+        for root, dirs, files in os.walk(self.repo_root):
             # 过滤忽略目录
             dirs[:] = [d for d in dirs if d not in self.ignore_list]
             
             # 计算缩进层级
-            level = root.replace(self.root_path, '').count(os.sep)
+            level = root.replace(self.repo_root, '').count(os.sep)
             indent = ' ' * 4 * level
             
             # 添加文件夹名
-            folder_name = os.path.basename(root) or self.root_path
+            folder_name = os.path.basename(root) or self.repo_root
             tree.append(f"{indent}📂 {folder_name}/")
             
             # 添加该目录下的 Python 文件及其元数据
@@ -56,5 +56,5 @@ class ProjectScanner:
 if __name__ == "__main__":
     # 组长可以在本地直接运行此文件进行效果预览
     scanner = ProjectScanner()
-    print("--- [V2] 仓库级全景扫描地图 ---")
-    print(scanner.scan_structure())
+    print("--- [V3] 仓库级全景扫描地图 ---")
+    print(scanner.scan())
