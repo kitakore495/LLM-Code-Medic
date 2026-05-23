@@ -13,26 +13,19 @@ class RepairPipeline:
 
     def __init__(self):
 
-        # =====================================================
-        # 锁定测试战区
-        # =====================================================
-        self.repo_root = os.path.abspath(
+        self.test_repo_root = os.path.abspath(
             "./tests/v3"
         )
 
     # =========================================================
-    # 装载测试仓库源码
+    # 装载仓库文件快照
     # =========================================================
-    def _load_repo_files(self):
+    def load_repo_files(self):
 
         repo_files = {}
 
-        print(
-            "\n[Step 2] 正在装载测试仓库源码快照..."
-        )
-
         for root, _, files in os.walk(
-            self.repo_root
+            self.test_repo_root
         ):
 
             for file in files:
@@ -46,7 +39,7 @@ class RepairPipeline:
 
                     rel_path = os.path.relpath(
                         full_path,
-                        self.repo_root
+                        self.test_repo_root
                     )
 
                     rel_path = (
@@ -65,38 +58,24 @@ class RepairPipeline:
                         ] = f.read()
 
                     print(
-                        f"   -> 已装载初始文件快照: "
+                        "   -> 已装载初始文件快照: "
                         f"{rel_path}"
                     )
 
         return repo_files
 
     # =========================================================
-    # 初始报错（后续改成真实运行捕获）
-    # =========================================================
-    def _build_initial_error(self):
-
-        return """
-Traceback (most recent call last):
-  File "main.py", line 11, in run_pipeline
-    result = utils.compute_core_logic(input_data)
-AttributeError: module 'utils' has no attribute 'compute_core_logic'
-""".strip()
-
-    # =========================================================
-    # 执行修复流程
+    # 主执行入口
     # =========================================================
     def execute(self):
 
-        # =====================================================
-        # Step 1 AST 扫描
-        # =====================================================
         print(
-            "\n[Step 1] 正在启动 AST 静态扫描器绘制全景地图..."
+            "\n[Step 1] "
+            "正在启动 AST 静态扫描器绘制全景地图..."
         )
 
         scanner = ProjectScanner(
-            repo_root=self.repo_root
+            repo_root=self.test_repo_root
         )
 
         project_map_context = (
@@ -108,24 +87,81 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
         )
 
         # =====================================================
-        # Step 2 装载仓库源码
+        # Step 2
         # =====================================================
+        print(
+            "\n[Step 2] "
+            "正在装载测试仓库源码快照..."
+        )
+
         initial_repo_files = (
-            self._load_repo_files()
+            self.load_repo_files()
         )
 
         # =====================================================
-        # Step 3 初始状态
+        # Step 3
+        # =====================================================
+        INITIAL_ERROR = """
+Traceback (most recent call last):
+  File "main.py", line 11, in run_pipeline
+    result = utils.compute_core_logic(input_data)
+AttributeError: module 'utils' has no attribute 'compute_core_logic'
+""".strip()
+
+        # =====================================================
+        # Runtime Info
+        # =====================================================
+        diagnose_provider = os.getenv(
+            "DIAGNOSE_PROVIDER",
+            "deepseek"
+        )
+
+        diagnose_model = os.getenv(
+            "DIAGNOSE_MODEL",
+            "deepseek-ai/DeepSeek-R1"
+        )
+
+        repair_provider = os.getenv(
+            "REPAIR_PROVIDER",
+            "deepseek"
+        )
+
+        repair_model = os.getenv(
+            "REPAIR_MODEL",
+            "deepseek-ai/DeepSeek-V3"
+        )
+
+        print(
+            "\n🧠 当前运行配置"
+        )
+
+        print(
+            f"   Diagnose: "
+            f"{diagnose_provider}"
+            f" | "
+            f"{diagnose_model}"
+        )
+
+        print(
+            f"   Repair: "
+            f"{repair_provider}"
+            f" | "
+            f"{repair_model}"
+        )
+
+        # =====================================================
+        # State
         # =====================================================
         initial_state = {
+
             "repo_root":
-                self.repo_root,
+                self.test_repo_root,
 
             "project_map":
                 project_map_context,
 
             "error_message":
-                self._build_initial_error(),
+                INITIAL_ERROR,
 
             "target_files":
                 [],
@@ -144,10 +180,12 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
         }
 
         # =====================================================
-        # Step 4 编译 Graph
+        # Step 3
         # =====================================================
         print(
-            "\n[Step 3] 正在编译 LangGraph 多文件状态机..."
+            "\n[Step 3] "
+            "正在编译 LangGraph "
+            "多文件状态机..."
         )
 
         app = (
@@ -155,10 +193,11 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
         )
 
         # =====================================================
-        # Step 5 启动自动修复
+        # Step 4
         # =====================================================
         print(
-            "\n[Step 4] 🚀 开始执行自动化修复流程..."
+            "\n[Step 4] 🚀 "
+            "开始执行自动化修复流程..."
         )
 
         final_state = app.invoke(
