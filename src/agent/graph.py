@@ -3,14 +3,11 @@ import re
 
 from dotenv import load_dotenv
 
-# =========================================================
-# 强制锁死加载 .env（兼容 Engine Core / VSCode / CLI）
-# =========================================================
-ROOT_DIR = os.path.abspath(
-    os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        ".."
+ROOT_DIR = os.path.dirname(
+    os.path.dirname(
+        os.path.dirname(
+            os.path.abspath(__file__)
+        )
     )
 )
 
@@ -34,13 +31,14 @@ from langgraph.graph import (
     END
 )
 
+from langchain_openai import ChatOpenAI
+from langchain_google_genai import (
+    ChatGoogleGenerativeAI
+)
+
 from langchain_core.messages import (
     SystemMessage,
     HumanMessage
-)
-
-from langchain_openai import (
-    ChatOpenAI
 )
 
 from src.agent.prompts import (
@@ -65,141 +63,61 @@ class AgentState(TypedDict):
     attempts: int
     is_fixed: bool
     analysis: str
-# =========================================================
-# DeepSeek LLM 工厂
-# =========================================================
-def create_llm(model_name: str, temperature: float):
-
-    api_key = os.getenv("DEEPSEEK_API_KEY")
-    base_url = os.getenv("DEEPSEEK_API_BASE")
-
-    if not api_key:
-        raise RuntimeError("缺少 DEEPSEEK_API_KEY")
-
-    if not base_url:
-        raise RuntimeError("缺少 DEEPSEEK_API_BASE")
-
-    return ChatOpenAI(
-        model=model_name,
-        temperature=temperature,
-        api_key=api_key,
-        base_url=base_url
-    )
 
 
 # =========================================================
-# 路径归一化（核心修复）
+# Provider Router
 # =========================================================
-def normalize_relative_path(path: str):
+def create_llm(
+    provider: str,
+    model_name: str,
+    temperature: float = 0.2
+):
 
-    path = path.strip()
+    provider = provider.lower()
 
-    # windows -> unix
-    path = path.replace("\\", "/")
+    if provider == "deepseek":
 
-    # 去掉 markdown 垃圾
-    path = path.replace("`", "")
-
-    # 去掉 ./ 开头
-    path = re.sub(r"^\./", "", path)
-
-    # 去掉 tests/v3/
-    path = re.sub(r"^tests?/v3/", "", path)
-
-    # 去掉 v3/
-    path = re.sub(r"^v3/", "", path)
-
-    # 去掉 output/
-    path = re.sub(r"^output/", "", path)
-
-    # 去掉 src/
-    path = re.sub(r"^src/", "", path)
-
-    # 防止重复斜杠
-    path = re.sub(r"/+", "/", path)
-
-    return path.strip("/")
-
-
-# =========================================================
-# 提取 TARGET_FILES
-# =========================================================
-def extract_target_files(text: str) -> List[str]:
-
-    match = re.search(
-        r"TARGET_FILES:\s*\[(.*?)\]",
-        text,
-        re.DOTALL
-    )
-
-    if not match:
-        return []
-
-    raw = match.group(1)
-
-    result = []
-
-    for item in raw.split(","):
-
-        item = item.strip().strip("'\"")
-
-        if not item:
-            continue
-
-        item = normalize_relative_path(item)
-
-        result.append(item)
-
-    return result
-
-
-# =========================================================
-# 解析多文件补丁
-# =========================================================
-def parse_patch_response(reply: str):
-
-    pattern = re.compile(
-        r"<<<FILE_PATH:\s*(.*?)\s*>>>\s*(.*?)\s*<<<FILE_END>>>",
-        re.DOTALL
-    )
-
-    matches = pattern.findall(reply)
-
-    cleaned_matches = []
-
-    for file_path, code_content in matches:
-
-        normalized_path = normalize_relative_path(
-            file_path
+        api_key = os.getenv(
+            "DEEPSEEK_API_KEY"
         )
 
-        cleaned_matches.append(
-            (normalized_path, code_content)
+        api_base = os.getenv(
+            "DEEPSEEK_API_BASE"
         )
 
-    return cleaned_matches
+        if not api_key:
+            raise RuntimeError(
+                "缺少 DEEPSEEK_API_KEY"
+            )
 
+        return ChatOpenAI(
+            model=model_name,
+            temperature=temperature,
+            api_key=api_key,
+            base_url=api_base
+        )
 
-# =========================================================
-# 清理 markdown codeblock
-# =========================================================
-def clean_code_block(content: str):
+    elif provider == "gemini":
 
-    content = content.strip()
+        api_key = os.getenv(
+            "GEMINI_API_KEY"
+        )
 
-    content = re.sub(
-        r"^```(?:python)?",
-        "",
-        content
+        if not api_key:
+            raise RuntimeError(
+                "缺少 GEMINI_API_KEY"
+            )
+
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            temperature=temperature,
+            google_api_key=api_key
+        )
+
+    raise RuntimeError(
+        f"未知 provider: {provider}"
     )
-
-    content = re.sub(
-        r"```$",
-        "",
-        content
-    )
-
-    return content.strip()
 
 
 # =========================================================
@@ -212,57 +130,154 @@ def diagnose_node(state: AgentState):
         f"第 {state['attempts'] + 1} 轮诊断..."
     )
 
+    provider = os.getenv(
+        "DIAGNOSE_PROVIDER",
+        "deepseek"
+    )
+
+    model = os.getenv(
+        "DIAGNOSE_MODEL",
+        "deepseek-ai/DeepSeek-R1"
+    )
+
     llm = create_llm(
-        model_name="deepseek-ai/DeepSeek-R1",
+        provider=provider,
+        model_name=model,
         temperature=0.2
     )
 
-    current_codes_context = "\n".join([
-        f"--- 文件路径: {path} ---\n{content}\n"
-        for path, content in state["repo_files"].items()
-    ])
+    repo_snapshot = "\n\n".join(
+        [
+            f"===== {path} =====\n{code}"
+            for path, code
+            in state["repo_files"].items()
+        ]
+    )
 
-    user_content = f"""
-【AST 全景地图】
-{state['project_map']}
+    user_prompt = f"""
+AST 全景地图：
 
-【仓库代码快照】
-{current_codes_context}
+{state["project_map"]}
 
-【最新报错】
-{state['error_message']}
-"""
+当前代码仓库：
 
-    messages = [
-        SystemMessage(content=DIAGNOSE_SYSTEM_PROMPT),
-        HumanMessage(content=user_content)
-    ]
+{repo_snapshot}
 
-    response = llm.invoke(messages)
+当前错误：
+
+{state["error_message"]}
+""".strip()
+
+    response = llm.invoke(
+        [
+            SystemMessage(
+                content=DIAGNOSE_SYSTEM_PROMPT
+            ),
+            HumanMessage(
+                content=user_prompt
+            )
+        ]
+    )
 
     analysis_text = response.content
 
-    target_files = extract_target_files(
-        analysis_text
+    target_files = []
+
+    # =====================================================
+    # 1. 新协议：
+    #
+    # TARGET_FILES:
+    # main.py
+    # utils.py
+    # =====================================================
+    block_match = re.search(
+        r"TARGET_FILES:\s*(.+)",
+        analysis_text,
+        re.DOTALL
     )
 
+    if block_match:
+
+        lines = block_match.group(1)
+
+        for line in lines.splitlines():
+
+            line = line.strip()
+
+            if not line:
+                continue
+
+            if line.startswith(
+                "ANALYSIS"
+            ):
+                continue
+
+            line = (
+                line
+                .replace("tests/v3/", "")
+                .replace("v3/", "")
+                .replace("./", "")
+                .strip("'\" ")
+            )
+
+            if line.endswith(".py"):
+                target_files.append(
+                    line
+                )
+
+    # =====================================================
+    # 2. 老协议兼容
+    #
+    # TARGET_FILES:
+    # ['main.py', 'utils.py']
+    # =====================================================
     if not target_files:
 
-        print(
-            "⚠️ 未提取到 TARGET_FILES，"
-            "回退全仓修复"
+        old_match = re.search(
+            r"TARGET_FILES.*?\[(.*?)\]",
+            analysis_text,
+            re.DOTALL
         )
 
-        target_files = list(
-            state["repo_files"].keys()
+        if old_match:
+
+            raw = old_match.group(1)
+
+            target_files = re.findall(
+                r"[A-Za-z0-9_/\-.]+\.py",
+                raw
+            )
+
+    # =====================================================
+    # 3. Gemini fallback
+    # =====================================================
+    if not target_files:
+
+        target_files = re.findall(
+            r"[A-Za-z0-9_/\-.]+\.py",
+            analysis_text
         )
 
-    print(f"🎯 目标文件: {target_files}")
+    target_files = list(
+        dict.fromkeys(
+            [
+                x
+                .replace("tests/v3/", "")
+                .replace("v3/", "")
+                for x in target_files
+            ]
+        )
+    )
+
+    print(
+        f"🎯 目标文件: "
+        f"{target_files}"
+    )
 
     return {
+        **state,
         "analysis": analysis_text,
-        "target_files": target_files,
-        "attempts": state["attempts"] + 1
+        "target_files": target_files
     }
 
 
@@ -276,81 +291,110 @@ def repair_node(state: AgentState):
         "正在生成多文件补丁..."
     )
 
-    llm = create_llm(
-        model_name="deepseek-ai/DeepSeek-V3",
-        temperature=0.1
+    provider = os.getenv(
+        "REPAIR_PROVIDER",
+        "deepseek"
     )
 
-    user_content = f"""
-【诊断报告】
-{state['analysis']}
+    model = os.getenv(
+        "REPAIR_MODEL",
+        "deepseek-ai/DeepSeek-V3"
+    )
 
-【必须修改的文件】
-{state['target_files']}
+    llm = create_llm(
+        provider=provider,
+        model_name=model,
+        temperature=0.2
+    )
 
-【当前仓库代码】
-{state['repo_files']}
+    repo_snapshot = "\n\n".join(
+        [
+            f"===== {path} =====\n{code}"
+            for path, code
+            in state["repo_files"].items()
+        ]
+    )
 
-请严格按照协议输出完整补丁。
-"""
+    user_prompt = f"""
+错误分析：
 
-    messages = [
-        SystemMessage(content=REPAIR_SYSTEM_PROMPT),
-        HumanMessage(content=user_content)
-    ]
+{state["analysis"]}
 
-    response = llm.invoke(messages)
+当前仓库：
 
-    reply = response.content
+{repo_snapshot}
+""".strip()
 
-    matches = parse_patch_response(reply)
+    response = llm.invoke(
+        [
+            SystemMessage(
+                content=REPAIR_SYSTEM_PROMPT
+            ),
+            HumanMessage(
+                content=user_prompt
+            )
+        ]
+    )
 
-    updated_repo_files = state["repo_files"].copy()
-
-    if not matches:
-
-        print("⚠️ 未解析到补丁")
-
-        return {
-            "repo_files": updated_repo_files
-        }
+    raw_patch = response.content
 
     print(
-        f"📝 已解析补丁块数量: "
-        f"{len(matches)}"
+        "\n================ "
+        "LLM PATCH RAW "
+        "================"
     )
 
-    for file_path, code_content in matches:
+    print(raw_patch)
 
-        normalized_path = normalize_relative_path(
-            file_path
+    print(
+        "========================================="
+    )
+
+    repo_files = dict(
+        state["repo_files"]
+    )
+
+    patch_regex = re.compile(
+        r"""
+<<<FILE_PATH:\s*(.*?)>>>
+(.*?)
+<<<FILE_END>>>
+""",
+        re.DOTALL | re.VERBOSE
+    )
+
+    patches = patch_regex.findall(
+        raw_patch
+    )
+
+    print(
+        f"\n📝 已解析补丁块数量: "
+        f"{len(patches)}"
+    )
+
+    for path, content in patches:
+
+        path = (
+            path.strip()
+            .replace("tests/v3/", "")
+            .replace("v3/", "")
+            .replace("./", "")
         )
 
-        clean_code = clean_code_block(
-            code_content
+        repo_files[path] = (
+            content.strip()
+            + "\n"
         )
-
-        if not clean_code.strip():
-
-            print(
-                f"⚠️ 空补丁已跳过: "
-                f"{normalized_path}"
-            )
-
-            continue
-
-        updated_repo_files[
-            normalized_path
-        ] = clean_code
 
         print(
             f"   -> 已更新: "
-            f"{normalized_path} "
-            f"({len(clean_code)} bytes)"
+            f"{path} "
+            f"({len(content)} bytes)"
         )
 
     return {
-        "repo_files": updated_repo_files
+        **state,
+        "repo_files": repo_files
     }
 
 
@@ -365,93 +409,95 @@ def verify_node(state: AgentState):
     )
 
     executor = CodeExecutor(
-        repo_root=state["repo_root"]
+        state["repo_root"]
     )
 
-    success, current_error = executor.run_v3_validation(
-        state["repo_files"]
+    success, error_message = (
+        executor.run_v3_validation(
+            state["repo_files"]
+        )
     )
 
     if success:
 
-        print("🎉 所有测试通过")
+        print(
+            "🎉 所有测试通过"
+        )
 
         return {
-            "is_fixed": True,
-            "error_message": ""
+            **state,
+            "is_fixed": True
         }
 
-    print("❌ 沙箱验证失败")
+    print(
+        "❌ 沙箱验证失败"
+    )
 
     return {
-        "is_fixed": False,
-        "error_message": current_error
+        **state,
+        "attempts":
+        state["attempts"] + 1,
+        "error_message":
+        error_message
     }
 
 
 # =========================================================
 # Router
 # =========================================================
-def should_continue(state: AgentState):
+def router(state: AgentState):
 
     if state["is_fixed"]:
         return END
 
     if state["attempts"] >= 3:
-
-        print(
-            "🚨 达到最大重试次数"
-        )
-
         return END
 
     return "diagnose"
 
 
 # =========================================================
-# 创建状态图
+# Graph Builder
 # =========================================================
-def create_v3_medic_graph():
+def create_v4_medic_graph():
 
-    workflow = StateGraph(AgentState)
+    graph = StateGraph(
+        AgentState
+    )
 
-    workflow.add_node(
+    graph.add_node(
         "diagnose",
         diagnose_node
     )
 
-    workflow.add_node(
+    graph.add_node(
         "repair",
         repair_node
     )
 
-    workflow.add_node(
+    graph.add_node(
         "verify",
         verify_node
     )
 
-    workflow.add_edge(
+    graph.add_edge(
         START,
         "diagnose"
     )
 
-    workflow.add_edge(
+    graph.add_edge(
         "diagnose",
         "repair"
     )
 
-    workflow.add_edge(
+    graph.add_edge(
         "repair",
         "verify"
     )
 
-    workflow.add_conditional_edges(
+    graph.add_conditional_edges(
         "verify",
-        should_continue,
-        {
-            "diagnose": "diagnose",
-            END: END
-        }
+        router
     )
 
-    return workflow.compile()
+    return graph.compile()
