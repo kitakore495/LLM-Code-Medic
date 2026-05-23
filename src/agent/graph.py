@@ -1,18 +1,56 @@
 import os
 import re
 
-from typing import TypedDict, Dict, List
+from dotenv import load_dotenv
 
-from langgraph.graph import StateGraph, START, END
-from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_openai import ChatOpenAI
+# =========================================================
+# 强制锁死加载 .env（兼容 Engine Core / VSCode / CLI）
+# =========================================================
+ROOT_DIR = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        ".."
+    )
+)
+
+ENV_PATH = os.path.join(
+    ROOT_DIR,
+    ".env"
+)
+
+load_dotenv(
+    dotenv_path=ENV_PATH,
+    override=True
+)
+
+from typing import TypedDict
+from typing import List
+from typing import Dict
+
+from langgraph.graph import (
+    StateGraph,
+    START,
+    END
+)
+
+from langchain_core.messages import (
+    SystemMessage,
+    HumanMessage
+)
+
+from langchain_openai import (
+    ChatOpenAI
+)
 
 from src.agent.prompts import (
     DIAGNOSE_SYSTEM_PROMPT,
     REPAIR_SYSTEM_PROMPT
 )
 
-from src.tools.executor import CodeExecutor
+from src.tools.executor import (
+    CodeExecutor
+)
 
 
 # =========================================================
@@ -27,8 +65,6 @@ class AgentState(TypedDict):
     attempts: int
     is_fixed: bool
     analysis: str
-
-
 # =========================================================
 # DeepSeek LLM 工厂
 # =========================================================
