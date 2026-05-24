@@ -10,6 +10,10 @@ from src.config.runtime_config import (
     runtime_config
 )
 
+from src.plugins.plugin_manager import (
+    PluginManager
+)
+
 
 class RepairPipeline:
 
@@ -20,6 +24,13 @@ class RepairPipeline:
 
         self.repo_root = (
             repo_root
+        )
+
+        # =====================================================
+        # Plugin Manager
+        # =====================================================
+        self.plugin_manager = (
+            PluginManager()
         )
 
     # =========================================================
@@ -46,7 +57,6 @@ class RepairPipeline:
                 if not file.endswith(
                     ".py"
                 ):
-
                     continue
 
                 full_path = (
@@ -203,6 +213,34 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
                 initial_state
             )
         )
+
+        # =====================================================
+        # Plugin Pipeline
+        # =====================================================
+        print(
+            "\n[Step 5] 🧩 "
+            "执行 Plugin System..."
+        )
+
+        updated_repo_files = (
+            self.plugin_manager
+            .run_all(
+                repo_files=(
+                    final_state[
+                        "repo_files"
+                    ]
+                ),
+                analysis=(
+                    final_state[
+                        "analysis"
+                    ]
+                )
+            )
+        )
+
+        final_state[
+            "repo_files"
+        ] = updated_repo_files
 
         print(
             "\n"
