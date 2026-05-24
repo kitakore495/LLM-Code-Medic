@@ -1,69 +1,137 @@
-import os
-
-from src.llm.model_factory import (
-    create_model
+from src.config.runtime_config import (
+    runtime_config
 )
 
 
-# =========================================================
-# Diagnose LLM
-# =========================================================
-def get_diagnose_llm():
+class ProviderRouter:
 
-    provider = os.getenv(
-        "DIAGNOSE_PROVIDER",
-        "deepseek"
-    ).strip().lower()
+    # =========================================================
+    # Diagnose Provider
+    # =========================================================
+    @staticmethod
+    def get_diagnose_provider():
 
-    model_name = os.getenv(
-        "DIAGNOSE_MODEL",
-        "deepseek-ai/DeepSeek-R1"
-    ).strip()
+        provider = (
+            runtime_config
+            .diagnose_provider
+            .lower()
+            .strip()
+        )
 
-    print(
-        f"🧠 Diagnose Provider: "
-        f"{provider}"
-    )
+        supported = [
+            "deepseek",
+            "gemini"
+        ]
 
-    print(
-        f"🧠 Diagnose Model: "
-        f"{model_name}"
-    )
+        if provider not in supported:
 
-    return create_model(
-        provider=provider,
-        model_name=model_name,
-        temperature=0.2
-    )
+            raise ValueError(
+                "不支持的 Diagnose Provider: "
+                f"{provider}"
+            )
 
+        return provider
 
-# =========================================================
-# Repair LLM
-# =========================================================
-def get_repair_llm():
+    # =========================================================
+    # Diagnose Model
+    # =========================================================
+    @staticmethod
+    def get_diagnose_model():
 
-    provider = os.getenv(
-        "REPAIR_PROVIDER",
-        "deepseek"
-    ).strip().lower()
+        model = (
+            runtime_config
+            .diagnose_model
+            .strip()
+        )
 
-    model_name = os.getenv(
-        "REPAIR_MODEL",
-        "deepseek-ai/DeepSeek-V3"
-    ).strip()
+        if not model:
 
-    print(
-        f"🧠 Repair Provider: "
-        f"{provider}"
-    )
+            raise RuntimeError(
+                "DIAGNOSE_MODEL 未配置"
+            )
 
-    print(
-        f"🧠 Repair Model: "
-        f"{model_name}"
-    )
+        return model
 
-    return create_model(
-        provider=provider,
-        model_name=model_name,
-        temperature=0.2
-    )
+    # =========================================================
+    # Repair Provider
+    # =========================================================
+    @staticmethod
+    def get_repair_provider():
+
+        provider = (
+            runtime_config
+            .repair_provider
+            .lower()
+            .strip()
+        )
+
+        supported = [
+            "deepseek",
+            "gemini"
+        ]
+
+        if provider not in supported:
+
+            raise ValueError(
+                "不支持的 Repair Provider: "
+                f"{provider}"
+            )
+
+        return provider
+
+    # =========================================================
+    # Repair Model
+    # =========================================================
+    @staticmethod
+    def get_repair_model():
+
+        model = (
+            runtime_config
+            .repair_model
+            .strip()
+        )
+
+        if not model:
+
+            raise RuntimeError(
+                "REPAIR_MODEL 未配置"
+            )
+
+        return model
+
+    # =========================================================
+    # Debug
+    # =========================================================
+    @staticmethod
+    def is_debug():
+
+        return runtime_config.debug
+
+    # =========================================================
+    # Runtime Config Print
+    # =========================================================
+    @staticmethod
+    def print_runtime_config():
+
+        print(
+            "\n🧠 当前运行配置"
+        )
+
+        print(
+            f"   Diagnose: "
+            f"{runtime_config.diagnose_provider}"
+            f" | "
+            f"{runtime_config.diagnose_model}"
+        )
+
+        print(
+            f"   Repair: "
+            f"{runtime_config.repair_provider}"
+            f" | "
+            f"{runtime_config.repair_model}"
+        )
+
+        print(
+            f"   Debug: "
+            f"{runtime_config.debug}"
+        )

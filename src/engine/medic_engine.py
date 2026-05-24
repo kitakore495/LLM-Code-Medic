@@ -2,19 +2,26 @@ from src.engine.repair_pipeline import (
     RepairPipeline
 )
 
-from src.engine.runtime_session import (
-    RuntimeSession
-)
-
 
 class MedicEngine:
 
-    def __init__(self):
+    def __init__(
+        self,
+        repo_root: str
+    ):
 
-        self.session = RuntimeSession()
+        self.repo_root = (
+            repo_root
+        )
 
-        self.pipeline = RepairPipeline()
+        self.pipeline = (
+            RepairPipeline(
+                repo_root=repo_root
+            )
+        )
 
-    def run(self):
+    def run(
+        self
+    ):
 
         self.pipeline.execute()

@@ -4,29 +4,45 @@ import shutil
 import subprocess
 import traceback
 
-from typing import Dict, Tuple
+from typing import Dict
+from typing import Tuple
+
+from src.config.runtime_config import (
+    runtime_config
+)
 
 
 class CodeExecutor:
 
-    def __init__(self, repo_root: str):
+    def __init__(
+        self,
+        repo_root: str
+    ):
 
         # tests/v3
-        self.repo_root = os.path.abspath(repo_root)
+        self.repo_root = os.path.abspath(
+            repo_root
+        )
 
         # 项目根目录
-        self.project_root = os.path.dirname(
+        self.project_root = (
             os.path.dirname(
                 os.path.dirname(
-                    os.path.abspath(__file__)
+                    os.path.dirname(
+                        os.path.abspath(
+                            __file__
+                        )
+                    )
                 )
             )
         )
 
         # output/
-        self.output_root = os.path.join(
-            self.project_root,
-            "output"
+        self.output_root = (
+            os.path.join(
+                self.project_root,
+                "output"
+            )
         )
 
     # =========================================================
@@ -39,11 +55,19 @@ class CodeExecutor:
     ):
 
         full_path = os.path.abspath(
-            os.path.join(root, relative_path)
+            os.path.join(
+                root,
+                relative_path
+            )
         )
 
-        root_real = os.path.realpath(root)
-        full_real = os.path.realpath(full_path)
+        root_real = os.path.realpath(
+            root
+        )
+
+        full_real = os.path.realpath(
+            full_path
+        )
 
         if os.path.commonpath([
             root_real,
@@ -51,7 +75,8 @@ class CodeExecutor:
         ]) != root_real:
 
             raise ValueError(
-                f"非法路径穿越: {relative_path}"
+                "非法路径穿越: "
+                f"{relative_path}"
             )
 
         return full_path
@@ -59,13 +84,20 @@ class CodeExecutor:
     # =========================================================
     # 创建 output 工作区
     # =========================================================
-    def _prepare_output_workspace(self):
+    def _prepare_output_workspace(
+        self
+    ):
 
         # 删除旧 output
-        if os.path.exists(self.output_root):
-            shutil.rmtree(self.output_root)
+        if os.path.exists(
+            self.output_root
+        ):
 
-        # 复制 tests/v3 -> output
+            shutil.rmtree(
+                self.output_root
+            )
+
+        # copy repo -> output
         shutil.copytree(
             self.repo_root,
             self.output_root,
@@ -83,10 +115,14 @@ class CodeExecutor:
     # =========================================================
     # 清理 pycache
     # =========================================================
-    def _clean_pycache(self):
+    def _clean_pycache(
+        self
+    ):
 
-        for root, dirs, files in os.walk(
-            self.output_root
+        for root, dirs, files in (
+            os.walk(
+                self.output_root
+            )
         ):
 
             for d in dirs:
@@ -94,19 +130,29 @@ class CodeExecutor:
                 if d == "__pycache__":
 
                     shutil.rmtree(
-                        os.path.join(root, d),
+                        os.path.join(
+                            root,
+                            d
+                        ),
                         ignore_errors=True
                     )
 
             for f in files:
 
-                if f.endswith(".pyc"):
+                if f.endswith(
+                    ".pyc"
+                ):
 
                     try:
+
                         os.remove(
-                            os.path.join(root, f)
+                            os.path.join(
+                                root,
+                                f
+                            )
                         )
-                    except:
+
+                    except Exception:
                         pass
 
     # =========================================================
@@ -114,22 +160,33 @@ class CodeExecutor:
     # =========================================================
     def _write_output_files(
         self,
-        repo_files: Dict[str, str]
+        repo_files: Dict[
+            str,
+            str
+        ]
     ):
 
         print(
-            "   [Sandbox] 正在写入修复后的文件..."
+            "   [Sandbox] "
+            "正在写入修复后的文件..."
         )
 
-        for relative_path, code_content in repo_files.items():
+        for (
+            relative_path,
+            code_content
+        ) in repo_files.items():
 
-            full_path = self._safe_join(
-                self.output_root,
-                relative_path
+            full_path = (
+                self._safe_join(
+                    self.output_root,
+                    relative_path
+                )
             )
 
             os.makedirs(
-                os.path.dirname(full_path),
+                os.path.dirname(
+                    full_path
+                ),
                 exist_ok=True
             )
 
@@ -138,7 +195,10 @@ class CodeExecutor:
                 "w",
                 encoding="utf-8"
             ) as f:
-                f.write(code_content)
+
+                f.write(
+                    code_content
+                )
 
             print(
                 f"      -> 已输出: "
@@ -147,25 +207,32 @@ class CodeExecutor:
 
         print(
             f"   ✅ 已完成 "
-            f"{len(repo_files)} 个文件输出"
+            f"{len(repo_files)} "
+            f"个文件输出"
         )
 
     # =========================================================
     # 执行 output/main.py
     # =========================================================
-    def _run_output_sandbox(self):
+    def _run_output_sandbox(
+        self
+    ):
 
         self._clean_pycache()
 
-        test_entry = os.path.join(
-            self.output_root,
-            "main.py"
+        test_entry = (
+            os.path.join(
+                self.output_root,
+                "main.py"
+            )
         )
 
-        if not os.path.exists(test_entry):
+        if not os.path.exists(
+            test_entry
+        ):
 
             raise FileNotFoundError(
-                f"output 中缺少 main.py"
+                "output 中缺少 main.py"
             )
 
         print(
@@ -179,28 +246,31 @@ class CodeExecutor:
         )
 
         print(
-            "   🚀 正在 output/ 沙箱中运行..."
+            "   🚀 正在 output/ "
+            "沙箱中运行..."
         )
 
-        sandbox_env = os.environ.copy()
+        sandbox_env = (
+            os.environ.copy()
+        )
 
-        # 禁止 pycache
         sandbox_env[
             "PYTHONDONTWRITEBYTECODE"
         ] = "1"
 
-        # 强制 UTF-8
         sandbox_env[
             "PYTHONIOENCODING"
         ] = "utf-8"
 
-        # output 优先级最高
         sandbox_env[
             "PYTHONPATH"
         ] = self.output_root
 
         result = subprocess.run(
-            [sys.executable, "main.py"],
+            [
+                sys.executable,
+                "main.py"
+            ],
             cwd=self.output_root,
             capture_output=True,
             text=True,
@@ -210,21 +280,31 @@ class CodeExecutor:
             errors="replace"
         )
 
-        print(
-            "\n================ STDOUT ================"
-        )
+        if runtime_config.debug:
 
-        print(result.stdout)
+            print(
+                "\n================ "
+                "STDOUT "
+                "================"
+            )
 
-        print(
-            "\n================ STDERR ================"
-        )
+            print(
+                result.stdout
+            )
 
-        print(result.stderr)
+            print(
+                "\n================ "
+                "STDERR "
+                "================"
+            )
 
-        print(
-            "========================================"
-        )
+            print(
+                result.stderr
+            )
+
+            print(
+                "========================================"
+            )
 
         return result
 
@@ -233,34 +313,46 @@ class CodeExecutor:
     # =========================================================
     def run_v3_validation(
         self,
-        repo_files: Dict[str, str]
-    ) -> Tuple[bool, str]:
+        repo_files: Dict[
+            str,
+            str
+        ]
+    ) -> Tuple[
+        bool,
+        str
+    ]:
 
         try:
 
             print(
-                "   [Sandbox] 正在创建 Output 工作区..."
+                "   [Sandbox] "
+                "正在创建 Output 工作区..."
             )
 
-            # 1. 创建 output
             self._prepare_output_workspace()
 
-            # 2. 写入修复文件
             self._write_output_files(
                 repo_files
             )
 
-            # 3. 运行沙箱
-            result = self._run_output_sandbox()
+            result = (
+                self._run_output_sandbox()
+            )
 
-            # 4. 判定结果
-            if result.returncode == 0:
+            if (
+                result.returncode
+                == 0
+            ):
 
                 print(
-                    "\n🎉 Output 工作区测试通过"
+                    "\n🎉 Output "
+                    "工作区测试通过"
                 )
 
-                return True, ""
+                return (
+                    True,
+                    ""
+                )
 
             error_log = (
                 result.stderr
@@ -269,10 +361,14 @@ class CodeExecutor:
             )
 
             print(
-                "\n❌ Output 工作区测试失败"
+                "\n❌ Output "
+                "工作区测试失败"
             )
 
-            return False, error_log
+            return (
+                False,
+                error_log
+            )
 
         except subprocess.TimeoutExpired:
 

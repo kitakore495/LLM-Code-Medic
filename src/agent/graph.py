@@ -49,8 +49,11 @@ from src.tools.executor import (
 )
 
 from src.llm.provider_router import (
-    get_diagnose_llm,
-    get_repair_llm
+    ProviderRouter
+)
+
+from src.llm.model_factory import (
+    ModelFactory
 )
 
 
@@ -58,16 +61,158 @@ from src.llm.provider_router import (
 # 状态结构
 # =========================================================
 class AgentState(TypedDict):
+
     repo_root: str
+
     project_map: str
+
     error_message: str
+
     target_files: List[str]
+
     repo_files: Dict[str, str]
+
     attempts: int
+
     is_fixed: bool
+
     analysis: str
 
 
+# =========================================================
+# PATCH PARSER
+# =========================================================
+def parse_patch_response(
+    raw_text: str
+):
+
+    repo_updates = {}
+
+    pattern = re.compile(
+        r"<<<FILE_PATH:\s*(.*?)>>>"
+        r"(.*?)"
+        r"<<<FILE_END>>>",
+        re.DOTALL
+    )
+
+    matches = pattern.findall(
+        raw_text
+    )
+
+    print(
+        f"\n📝 已解析补丁块数量: "
+        f"{len(matches)}"
+    )
+
+    for (
+        relative_path,
+        code
+    ) in matches:
+
+        relative_path = (
+            relative_path
+            .strip()
+        )
+
+        relative_path = (
+            relative_path
+            .replace("\\", "/")
+        )
+
+        # 防御式路径修正
+        relative_path = re.sub(
+            r"^(tests/[^/]+/)",
+            "",
+            relative_path
+        )
+
+        relative_path = re.sub(
+            r"^(v\d+/)",
+            "",
+            relative_path
+        )
+
+        repo_updates[
+            relative_path
+        ] = code.strip()
+
+        print(
+            f"   -> 已更新: "
+            f"{relative_path} "
+            f"({len(code)} bytes)"
+        )
+
+    return repo_updates
+
+
+# =========================================================
+# Diagnose LLM
+# =========================================================
+def create_diagnose_llm():
+
+    provider = (
+        ProviderRouter
+        .get_diagnose_provider()
+    )
+
+    model_name = (
+        ProviderRouter
+        .get_diagnose_model()
+    )
+
+    print(
+        f"🧠 Diagnose Provider: "
+        f"{provider}"
+    )
+
+    print(
+        f"🧠 Diagnose Model: "
+        f"{model_name}"
+    )
+
+    return (
+        ModelFactory
+        .create_llm(
+            provider=provider,
+            model_name=model_name,
+            temperature=0.2
+        )
+    )
+
+
+# =========================================================
+# Repair LLM
+# =========================================================
+def create_repair_llm():
+
+    provider = (
+        ProviderRouter
+        .get_repair_provider()
+    )
+
+    model_name = (
+        ProviderRouter
+        .get_repair_model()
+    )
+
+    print(
+        f"🧠 Repair Provider: "
+        f"{provider}"
+    )
+
+    print(
+        f"🧠 Repair Model: "
+        f"{model_name}"
+    )
+
+    return (
+        ModelFactory
+        .create_llm(
+            provider=provider,
+            model_name=model_name,
+            temperature=0.2
+        )
+    )
 # =========================================================
 # Diagnose Node
 # =========================================================
@@ -77,46 +222,69 @@ def diagnose_node(
 
     print(
         f"\n🚀 [Diagnose] "
-        f"第 {state['attempts'] + 1} 轮诊断..."
+        f"第 {state['attempts'] + 1} "
+        f"轮诊断..."
     )
 
-    llm = get_diagnose_llm()
+    llm = (
+        create_diagnose_llm()
+    )
 
-    repo_context = ""
+    repo_snapshot = []
 
-    for path, content in state[
+    for (
+        path,
+        code
+    ) in state[
         "repo_files"
     ].items():
 
-        repo_context += (
-            f"\n\n"
-            f"===== FILE: {path} =====\n"
-            f"{content}"
+        repo_snapshot.append(
+            f"\n===== FILE: "
+            f"{path} =====\n"
         )
 
+        repo_snapshot.append(
+            code
+        )
+
+    repo_snapshot_text = (
+        "\n".join(
+            repo_snapshot
+        )
+    )
+
     user_prompt = f"""
+请分析当前软件项目：
+
 【AST 全景地图】
 {state["project_map"]}
 
-【项目源码快照】
-{repo_context}
+【仓库源码快照】
+{repo_snapshot_text}
 
-【错误日志】
+【当前错误】
 {state["error_message"]}
+
+请进行根因诊断。
 """.strip()
 
     response = llm.invoke([
-
         SystemMessage(
-            content=DIAGNOSE_SYSTEM_PROMPT
+            content=(
+                DIAGNOSE_SYSTEM_PROMPT
+            )
         ),
-
         HumanMessage(
             content=user_prompt
         )
     ])
 
-    analysis = response.content
+    analysis = (
+        response.content
+    )
+
+    target_files = []
 
     match = re.search(
         r"TARGET_FILES:\s*(\[.*?\])",
@@ -124,53 +292,54 @@ def diagnose_node(
         re.DOTALL
     )
 
-    target_files = []
-
     if match:
 
         try:
 
-            raw_files = eval(
-                match.group(1)
+            import ast
+
+            target_files = (
+                ast.literal_eval(
+                    match.group(1)
+                )
             )
-
-            for path in raw_files:
-
-                clean_path = (
-                    path
-                    .replace("\\", "/")
-                    .strip()
-                )
-
-                clean_path = re.sub(
-                    r"^(tests/.*?/)",
-                    "",
-                    clean_path
-                )
-
-                clean_path = re.sub(
-                    r"^(v\d+/)",
-                    "",
-                    clean_path
-                )
-
-                if clean_path in state[
-                    "repo_files"
-                ]:
-
-                    target_files.append(
-                        clean_path
-                    )
 
         except Exception:
 
-            pass
+            target_files = []
 
-    # fallback
-    if not target_files:
-        target_files = list(
-            state["repo_files"].keys()
+    # 防御式路径清洗
+    cleaned = []
+
+    for path in target_files:
+
+        path = (
+            path
+            .replace("\\", "/")
+            .strip()
         )
+
+        path = re.sub(
+            r"^(tests/[^/]+/)",
+            "",
+            path
+        )
+
+        path = re.sub(
+            r"^(v\d+/)",
+            "",
+            path
+        )
+
+        cleaned.append(
+            path
+        )
+
+    target_files = list(
+        dict.fromkeys(
+            cleaned
+        )
+    )
 
     print(
         f"🎯 目标文件: "
@@ -178,9 +347,17 @@ def diagnose_node(
     )
 
     return {
-        **state,
-        "analysis": analysis,
-        "target_files": target_files
+
+        "analysis":
+            analysis,
+
+        "target_files":
+            target_files,
+
+        "attempts":
+            state[
+                "attempts"
+            ] + 1
     }
 
 
@@ -196,48 +373,76 @@ def repair_node(
         "正在生成多文件补丁..."
     )
 
-    llm = get_repair_llm()
+    llm = (
+        create_repair_llm()
+    )
 
-    target_context = ""
+    repo_snapshot = []
 
-    for file_path in state[
-        "target_files"
-    ]:
+    for (
+        path,
+        code
+    ) in state[
+        "repo_files"
+    ].items():
 
-        code = state[
-            "repo_files"
-        ].get(file_path)
+        if (
+            state[
+                "target_files"
+            ]
+            and path not in
+            state[
+                "target_files"
+            ]
+        ):
+            continue
 
-        if code:
+        repo_snapshot.append(
+            f"\n===== FILE: "
+            f"{path} =====\n"
+        )
 
-            target_context += (
-                f"\n\n"
-                f"===== FILE: {file_path} =====\n"
-                f"{code}"
-            )
+        repo_snapshot.append(
+            code
+        )
+
+    repo_snapshot_text = (
+        "\n".join(
+            repo_snapshot
+        )
+    )
 
     user_prompt = f"""
-【错误分析】
+请修复当前项目。
+
+【根因分析】
 {state["analysis"]}
 
-【待修复文件源码】
-{target_context}
+【需要修复的源码】
+{repo_snapshot_text}
 
-请返回修复后的完整文件。
+要求：
+
+1. 输出完整文件
+2. 仅修改必要文件
+3. 不允许解释
+4. 严格遵守 FILE_PATH 协议
 """.strip()
 
     response = llm.invoke([
-
         SystemMessage(
-            content=REPAIR_SYSTEM_PROMPT
+            content=(
+                REPAIR_SYSTEM_PROMPT
+            )
         ),
-
         HumanMessage(
             content=user_prompt
         )
     ])
 
-    patch_text = response.content
+    raw_patch = (
+        response.content
+    )
 
     print(
         "\n================ "
@@ -245,70 +450,34 @@ def repair_node(
         "================"
     )
 
-    print(patch_text)
+    print(
+        raw_patch
+    )
 
     print(
         "========================================="
     )
 
-    pattern = re.compile(
-        r"<<<FILE_PATH:\s*(.*?)>>>"
-        r"\s*(.*?)"
-        r"<<<FILE_END>>>",
-        re.DOTALL
-    )
-
-    matches = pattern.findall(
-        patch_text
-    )
-
-    print(
-        f"\n📝 已解析补丁块数量: "
-        f"{len(matches)}"
-    )
-
-    updated_repo_files = dict(
-        state["repo_files"]
-    )
-
-    for file_path, code in matches:
-
-        clean_path = (
-            file_path
-            .replace("\\", "/")
-            .strip()
+    updates = (
+        parse_patch_response(
+            raw_patch
         )
+    )
 
-        clean_path = re.sub(
-            r"^(tests/.*?/)",
-            "",
-            clean_path
-        )
+    merged_repo_files = dict(
+        state[
+            "repo_files"
+        ]
+    )
 
-        clean_path = re.sub(
-            r"^(v\d+/)",
-            "",
-            clean_path
-        )
-
-        if clean_path in updated_repo_files:
-
-            updated_repo_files[
-                clean_path
-            ] = code.strip()
-
-            print(
-                f"   -> 已更新: "
-                f"{clean_path} "
-                f"({len(code)} bytes)"
-            )
+    merged_repo_files.update(
+        updates
+    )
 
     return {
-        **state,
-        "repo_files": updated_repo_files
+        "repo_files":
+            merged_repo_files
     }
-
-
 # =========================================================
 # Verify Node
 # =========================================================
@@ -321,13 +490,20 @@ def verify_node(
         "正在进行沙箱验证..."
     )
 
-    executor = CodeExecutor(
-        state["repo_root"]
+    executor = (
+        CodeExecutor(
+            repo_root=state[
+                "repo_root"
+            ]
+        )
     )
 
     success, error_log = (
-        executor.run_v3_validation(
-            state["repo_files"]
+        executor
+        .run_v3_validation(
+            state[
+                "repo_files"
+            ]
         )
     )
 
@@ -337,83 +513,92 @@ def verify_node(
             "🎉 所有测试通过"
         )
 
-        return {
-            **state,
-            "is_fixed": True
-        }
+    else:
 
-    print(
-        "❌ 沙箱验证失败"
-    )
+        print(
+            "❌ 沙箱验证失败"
+        )
 
     return {
-        **state,
-        "attempts": state[
-            "attempts"
-        ] + 1,
-        "error_message": error_log,
-        "is_fixed": False
+
+        "is_fixed":
+            success,
+
+        "error_message":
+            error_log
     }
 
 
 # =========================================================
-# Router
+# Continue Router
 # =========================================================
 def should_continue(
     state: AgentState
 ):
 
-    if state["is_fixed"]:
+    if state[
+        "is_fixed"
+    ]:
+
         return END
 
-    if state["attempts"] >= 3:
+    if state[
+        "attempts"
+    ] >= 5:
+
+        print(
+            "\n🚨 达到最大修复轮次"
+        )
+
         return END
 
     return "diagnose"
 
 
 # =========================================================
-# Graph
+# Build Graph
 # =========================================================
 def create_v4_medic_graph():
 
-    graph = StateGraph(
+    workflow = StateGraph(
         AgentState
     )
 
-    graph.add_node(
+    workflow.add_node(
         "diagnose",
         diagnose_node
     )
 
-    graph.add_node(
+    workflow.add_node(
         "repair",
         repair_node
     )
 
-    graph.add_node(
+    workflow.add_node(
         "verify",
         verify_node
     )
 
-    graph.add_edge(
+    workflow.add_edge(
         START,
         "diagnose"
     )
 
-    graph.add_edge(
+    workflow.add_edge(
         "diagnose",
         "repair"
     )
 
-    graph.add_edge(
+    workflow.add_edge(
         "repair",
         "verify"
     )
 
-    graph.add_conditional_edges(
+    workflow.add_conditional_edges(
         "verify",
         should_continue
     )
 
-    return graph.compile()
+    return (
+        workflow.compile()
+    )

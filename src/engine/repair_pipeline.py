@@ -1,5 +1,3 @@
-import os
-
 from src.agent.graph import (
     create_v4_medic_graph
 )
@@ -8,74 +6,106 @@ from src.tools.scanner import (
     ProjectScanner
 )
 
+from src.config.runtime_config import (
+    runtime_config
+)
+
 
 class RepairPipeline:
 
-    def __init__(self):
+    def __init__(
+        self,
+        repo_root: str
+    ):
 
-        self.test_repo_root = os.path.abspath(
-            "./tests/v3"
+        self.repo_root = (
+            repo_root
         )
 
     # =========================================================
-    # 装载仓库文件快照
+    # 装载仓库源码快照
     # =========================================================
-    def load_repo_files(self):
+    def load_repo_files(
+        self
+    ):
+
+        import os
 
         repo_files = {}
 
-        for root, _, files in os.walk(
-            self.test_repo_root
+        for (
+            root,
+            _,
+            files
+        ) in os.walk(
+            self.repo_root
         ):
 
             for file in files:
 
-                if file.endswith(".py"):
+                if not file.endswith(
+                    ".py"
+                ):
 
-                    full_path = os.path.join(
+                    continue
+
+                full_path = (
+                    os.path.join(
                         root,
                         file
                     )
+                )
 
-                    rel_path = os.path.relpath(
+                rel_path = (
+                    os.path.relpath(
                         full_path,
-                        self.test_repo_root
+                        self.repo_root
                     )
+                )
 
-                    rel_path = (
+                rel_path = (
+                    rel_path.replace(
+                        "\\",
+                        "/"
+                    )
+                )
+
+                with open(
+                    full_path,
+                    "r",
+                    encoding="utf-8"
+                ) as f:
+
+                    repo_files[
                         rel_path
-                        .replace("\\", "/")
-                    )
+                    ] = f.read()
 
-                    with open(
-                        full_path,
-                        "r",
-                        encoding="utf-8"
-                    ) as f:
-
-                        repo_files[
-                            rel_path
-                        ] = f.read()
-
-                    print(
-                        "   -> 已装载初始文件快照: "
-                        f"{rel_path}"
-                    )
+                print(
+                    "   -> 已装载初始文件快照: "
+                    f"{rel_path}"
+                )
 
         return repo_files
 
     # =========================================================
-    # 主执行入口
+    # 主执行流程
     # =========================================================
-    def execute(self):
+    def execute(
+        self
+    ):
 
         print(
             "\n[Step 1] "
-            "正在启动 AST 静态扫描器绘制全景地图..."
+            "正在启动 AST "
+            "静态扫描器绘制全景地图..."
         )
 
-        scanner = ProjectScanner(
-            repo_root=self.test_repo_root
+        scanner = (
+            ProjectScanner(
+                repo_root=(
+                    self.repo_root
+                )
+            )
         )
 
         project_map_context = (
@@ -86,9 +116,6 @@ class RepairPipeline:
             "✅ 全景地图绘制完毕。"
         )
 
-        # =====================================================
-        # Step 2
-        # =====================================================
         print(
             "\n[Step 2] "
             "正在装载测试仓库源码快照..."
@@ -99,7 +126,7 @@ class RepairPipeline:
         )
 
         # =====================================================
-        # Step 3
+        # 初始错误
         # =====================================================
         INITIAL_ERROR = """
 Traceback (most recent call last):
@@ -108,54 +135,31 @@ Traceback (most recent call last):
 AttributeError: module 'utils' has no attribute 'compute_core_logic'
 """.strip()
 
-        # =====================================================
-        # Runtime Info
-        # =====================================================
-        diagnose_provider = os.getenv(
-            "DIAGNOSE_PROVIDER",
-            "deepseek"
-        )
-
-        diagnose_model = os.getenv(
-            "DIAGNOSE_MODEL",
-            "deepseek-ai/DeepSeek-R1"
-        )
-
-        repair_provider = os.getenv(
-            "REPAIR_PROVIDER",
-            "deepseek"
-        )
-
-        repair_model = os.getenv(
-            "REPAIR_MODEL",
-            "deepseek-ai/DeepSeek-V3"
-        )
-
         print(
             "\n🧠 当前运行配置"
         )
 
         print(
             f"   Diagnose: "
-            f"{diagnose_provider}"
+            f"{runtime_config.diagnose_provider}"
             f" | "
-            f"{diagnose_model}"
+            f"{runtime_config.diagnose_model}"
         )
 
         print(
             f"   Repair: "
-            f"{repair_provider}"
+            f"{runtime_config.repair_provider}"
             f" | "
-            f"{repair_model}"
+            f"{runtime_config.repair_model}"
         )
 
         # =====================================================
-        # State
+        # 初始状态
         # =====================================================
         initial_state = {
 
             "repo_root":
-                self.test_repo_root,
+                self.repo_root,
 
             "project_map":
                 project_map_context,
@@ -179,9 +183,6 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
                 ""
         }
 
-        # =====================================================
-        # Step 3
-        # =====================================================
         print(
             "\n[Step 3] "
             "正在编译 LangGraph "
@@ -192,20 +193,20 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
             create_v4_medic_graph()
         )
 
-        # =====================================================
-        # Step 4
-        # =====================================================
         print(
             "\n[Step 4] 🚀 "
             "开始执行自动化修复流程..."
         )
 
-        final_state = app.invoke(
-            initial_state
+        final_state = (
+            app.invoke(
+                initial_state
+            )
         )
 
         print(
-            "\n=================================================="
+            "\n"
+            "=================================================="
         )
 
         if final_state.get(

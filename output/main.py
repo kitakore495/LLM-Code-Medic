@@ -5,10 +5,9 @@ def run_pipeline():
     print("🚀 启动自动化数据处理流水线...")
     
     input_data = 100
-    current_weight = 10  # 传入 10 会导致 utils 内部触发除零错误
+    current_weight = 11  # 修复：将 10 改为 11，避免 utils 内部触发除零错误
     
-    # ❌ 漏洞点 3：调用了不存在的旧接口 'compute_core_logic'
-    # ❌ 漏洞点 4：漏掉了必传参数 'weight'
+    # 修复：调用正确的接口 'execute_computation' 并传入所有必传参数 'input_data', 'current_weight'
     print("[Main] 正在调用底层工具链...")
     result = utils.execute_computation(input_data, current_weight)
     
