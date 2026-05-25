@@ -49,9 +49,6 @@ class UnitTestPlugin(
 
         test_files = []
 
-        # =====================================================
-        # 分类源码 / 测试文件
-        # =====================================================
         for path in (
             repo_files.keys()
         ):
@@ -117,7 +114,6 @@ class UnitTestPlugin(
             )
 
             if exists:
-
                 continue
 
             print(
@@ -136,7 +132,7 @@ class UnitTestPlugin(
                 self.generator
                 .generate_test(
                     file_name=file_path,
-                    code=source_code
+                    source_code=source_code
                 )
             )
 

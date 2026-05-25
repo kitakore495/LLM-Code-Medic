@@ -56,6 +56,10 @@ from src.llm.llm_invoker import (
     LLMInvoker
 )
 
+from src.quality.patch_quality_gate import (
+    PatchQualityGate
+)
+
 # =========================================================
 # 状态结构
 # =========================================================
@@ -536,7 +540,71 @@ def verify_node(
             error_log
     }
 
+def patch_quality_gate_node(
+    state: AgentState
+):
 
+    print(
+        "\n🧪 [Patch Quality Gate] "
+        "正在检查补丁质量..."
+    )
+
+    repo_files = state[
+        "repo_files"
+    ]
+
+    analysis = state.get(
+        "analysis",
+        ""
+    )
+
+    sandbox_stdout = state.get(
+        "sandbox_stdout",
+        ""
+    )
+
+    sandbox_stderr = state.get(
+        "sandbox_stderr",
+        ""
+    )
+    
+    gate = PatchQualityGate()
+
+    passed, reason = (
+        gate.check(
+            analysis=analysis,
+            original_files={},
+            repaired_files=repo_files,
+            target_files=state.get(
+                "target_files",
+                []
+            )
+        )  
+    )
+
+    if passed:
+
+        print(
+            "✅ [Patch Quality Gate] "
+            "补丁质量检查通过"
+        )
+
+    else:
+
+        print(
+            "❌ [Patch Quality Gate] "
+            f"检查失败: {reason}"
+        )
+
+    state[
+        "patch_quality_passed"
+    ] = passed
+
+    state[
+        "patch_quality_reason"
+    ] = reason
+
+    return state
 # =========================================================
 # Continue Router
 # =========================================================
@@ -561,8 +629,35 @@ def should_continue(
         return END
 
     return "diagnose"
+# =========================================================
+# Patch Quality Gate Router
+# =========================================================
+def should_continue_after_patch_gate(
+    state: AgentState
+):
 
+    passed = state.get(
+        "patch_quality_passed",
+        True
+    )
 
+    if passed:
+
+        print(
+            "✅ [Gate] Patch Quality 通过"
+        )
+
+        return "verify"
+
+    print(
+        "❌ [Gate] Patch Quality 未通过"
+    )
+
+    print(
+        "🔁 返回 Repair 重试"
+    )
+
+    return "repair"
 # =========================================================
 # Build Graph
 # =========================================================
@@ -572,6 +667,9 @@ def create_v4_medic_graph():
         AgentState
     )
 
+    # =====================================================
+    # Nodes
+    # =====================================================
     workflow.add_node(
         "diagnose",
         diagnose_node
@@ -583,10 +681,18 @@ def create_v4_medic_graph():
     )
 
     workflow.add_node(
+        "patch_quality_gate",
+        patch_quality_gate_node
+    )
+
+    workflow.add_node(
         "verify",
         verify_node
     )
 
+    # =====================================================
+    # Flow
+    # =====================================================
     workflow.add_edge(
         START,
         "diagnose"
@@ -597,16 +703,30 @@ def create_v4_medic_graph():
         "repair"
     )
 
+    # repair → quality gate
     workflow.add_edge(
         "repair",
-        "verify"
+        "patch_quality_gate"
     )
 
+    # =====================================================
+    # Patch Quality Gate
+    # =====================================================
+    workflow.add_conditional_edges(
+        "patch_quality_gate",
+        should_continue_after_patch_gate,
+        {
+            "verify": "verify",
+            "repair": "repair"
+        }
+    )
+
+    # =====================================================
+    # Verify
+    # =====================================================
     workflow.add_conditional_edges(
         "verify",
         should_continue
     )
 
-    return (
-        workflow.compile()
-    )
+    return workflow.compile()
