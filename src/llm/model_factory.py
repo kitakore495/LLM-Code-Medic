@@ -25,8 +25,14 @@ class ModelFactory:
             .strip()
         )
 
+        timeout = (
+            runtime_config
+            .llm_timeout
+        )
+
         # =====================================================
-        # DeepSeek (SiliconFlow OpenAI Compatible)
+        # DeepSeek
+        # (SiliconFlow OpenAI Compatible)
         # =====================================================
         if provider == "deepseek":
 
@@ -51,12 +57,14 @@ class ModelFactory:
                 model=model_name,
                 temperature=temperature,
                 api_key=api_key,
-                base_url=api_base
+                base_url=api_base,
+                timeout=timeout,
+                max_retries=0
             )
 
         # =====================================================
         # Gemini
-        # 延迟导入，避免未安装 SDK 崩溃
+        # 延迟导入避免依赖崩溃
         # =====================================================
         elif provider == "gemini":
 
@@ -68,7 +76,8 @@ class ModelFactory:
             if not api_key:
 
                 raise RuntimeError(
-                    "缺少 GEMINI_API_KEY"
+                    "缺少 "
+                    "GEMINI_API_KEY"
                 )
 
             try:
@@ -89,7 +98,8 @@ class ModelFactory:
             return ChatGoogleGenerativeAI(
                 model=model_name,
                 google_api_key=api_key,
-                temperature=temperature
+                temperature=temperature,
+                timeout=timeout
             )
 
         # =====================================================

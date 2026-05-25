@@ -6,6 +6,10 @@ from src.plugins.base_plugin import (
     BasePlugin
 )
 
+from src.plugins.llm_test_generator import (
+    LLMTestGenerator
+)
+
 
 class UnitTestPlugin(
     BasePlugin
@@ -13,6 +17,17 @@ class UnitTestPlugin(
 
     name = "unit_test"
 
+    def __init__(
+        self
+    ):
+
+        self.generator = (
+            LLMTestGenerator()
+        )
+
+    # =====================================================
+    # Plugin Run
+    # =====================================================
     def run(
         self,
         repo_files: Dict[
@@ -34,6 +49,9 @@ class UnitTestPlugin(
 
         test_files = []
 
+        # =====================================================
+        # 分类源码 / 测试文件
+        # =====================================================
         for path in (
             repo_files.keys()
         ):
@@ -68,8 +86,11 @@ class UnitTestPlugin(
             f"{len(test_files)}"
         )
 
-        missing_tests = []
+        generated_count = 0
 
+        # =====================================================
+        # 检测缺失测试
+        # =====================================================
         for file_path in (
             python_files
         ):
@@ -95,34 +116,67 @@ class UnitTestPlugin(
                 )
             )
 
-            if not exists:
+            if exists:
 
-                missing_tests.append(
-                    expected_test
-                )
-
-        if missing_tests:
+                continue
 
             print(
-                "\n⚠️ [UnitTest] "
-                "发现缺失测试:"
+                f"\n⚠️ [UnitTest] "
+                f"发现缺失测试: "
+                f"{expected_test}"
             )
 
-            for test in (
-                missing_tests
-            ):
+            source_code = (
+                repo_files[
+                    file_path
+                ]
+            )
+
+            generated_test = (
+                self.generator
+                .generate_test(
+                    file_name=file_path,
+                    code=source_code
+                )
+            )
+
+            if not generated_test:
 
                 print(
-                    f"   - 建议新增: "
-                    f"{test}"
+                    f"❌ [UnitTest] "
+                    f"生成失败: "
+                    f"{expected_test}"
                 )
 
-        else:
+                continue
+
+            # =================================================
+            # 写入 repo_files
+            # =================================================
+            repo_files[
+                expected_test
+            ] = generated_test
+
+            test_files.append(
+                expected_test
+            )
+
+            generated_count += 1
 
             print(
-                "✅ [UnitTest] "
-                "测试覆盖结构正常"
+                f"✅ [UnitTest] "
+                f"已生成: "
+                f"{expected_test}"
             )
+
+        # =====================================================
+        # Summary
+        # =====================================================
+        print(
+            "\n📊 [UnitTest] "
+            f"本次生成测试文件数: "
+            f"{generated_count}"
+        )
 
         print(
             "✅ [Plugin] "

@@ -100,6 +100,99 @@ class ProviderRouter:
         return model
 
     # =========================================================
+    # Fallback Provider
+    # =========================================================
+    @staticmethod
+    def get_fallback_provider():
+
+        provider = (
+            runtime_config
+            .fallback_provider
+            .lower()
+            .strip()
+        )
+
+        supported = [
+            "deepseek",
+            "gemini"
+        ]
+
+        if provider not in supported:
+
+            raise ValueError(
+                "不支持的 FALLBACK_PROVIDER: "
+                f"{provider}"
+            )
+
+        return provider
+
+    # =========================================================
+    # Fallback Model
+    # =========================================================
+    @staticmethod
+    def get_fallback_model():
+
+        model = (
+            runtime_config
+            .fallback_model
+            .strip()
+        )
+
+        if not model:
+
+            raise RuntimeError(
+                "FALLBACK_MODEL 未配置"
+            )
+
+        return model
+
+    # =========================================================
+    # Dynamic Fallback
+    # 自动切换 Provider
+    # =========================================================
+    @staticmethod
+    def get_dynamic_fallback_provider(
+        current_provider: str
+    ):
+
+        current_provider = (
+            current_provider
+            .lower()
+            .strip()
+        )
+
+        if current_provider == "deepseek":
+
+            return "gemini"
+
+        return "deepseek"
+
+    # =========================================================
+    # Dynamic Fallback Model
+    # =========================================================
+    @staticmethod
+    def get_dynamic_fallback_model(
+        provider: str
+    ):
+
+        provider = (
+            provider
+            .lower()
+            .strip()
+        )
+
+        if provider == "deepseek":
+
+            return (
+                "deepseek-ai/"
+                "DeepSeek-V3"
+            )
+
+        return (
+            "gemini-2.5-flash"
+        )
+
+    # =========================================================
     # Debug
     # =========================================================
     @staticmethod
@@ -129,6 +222,13 @@ class ProviderRouter:
             f"{runtime_config.repair_provider}"
             f" | "
             f"{runtime_config.repair_model}"
+        )
+
+        print(
+            f"   Fallback: "
+            f"{runtime_config.fallback_provider}"
+            f" | "
+            f"{runtime_config.fallback_model}"
         )
 
         print(

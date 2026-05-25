@@ -21,6 +21,12 @@ class RuntimeConfig:
     repair_model: str
 
     # =========================================================
+    # Fallback
+    # =========================================================
+    fallback_provider: str
+    fallback_model: str
+
+    # =========================================================
     # API
     # =========================================================
     deepseek_api_key: str
@@ -37,6 +43,13 @@ class RuntimeConfig:
     # Repo
     # =========================================================
     test_repo_root: str
+
+    # =========================================================
+    # LLM Resilience
+    # =========================================================
+    llm_retry_count: int
+    llm_timeout: int
+    llm_backoff_seconds: int
 
 
 def _to_bool(
@@ -65,7 +78,7 @@ runtime_config = RuntimeConfig(
 
     diagnose_model=os.getenv(
         "DIAGNOSE_MODEL",
-        "deepseek-ai/DeepSeek-R1"
+        "deepseek-ai/DeepSeek-V3"
     ),
 
     # =====================================================
@@ -79,6 +92,19 @@ runtime_config = RuntimeConfig(
     repair_model=os.getenv(
         "REPAIR_MODEL",
         "deepseek-ai/DeepSeek-V3"
+    ),
+
+    # =====================================================
+    # Fallback
+    # =====================================================
+    fallback_provider=os.getenv(
+        "FALLBACK_PROVIDER",
+        "gemini"
+    ),
+
+    fallback_model=os.getenv(
+        "FALLBACK_MODEL",
+        "gemini-2.5-flash"
     ),
 
     # =====================================================
@@ -115,5 +141,29 @@ runtime_config = RuntimeConfig(
     test_repo_root=os.getenv(
         "TEST_REPO_ROOT",
         "./tests/v3"
+    ),
+
+    # =====================================================
+    # LLM Resilience
+    # =====================================================
+    llm_retry_count=int(
+        os.getenv(
+            "LLM_RETRY_COUNT",
+            "3"
+        )
+    ),
+
+    llm_timeout=int(
+        os.getenv(
+            "LLM_TIMEOUT",
+            "120"
+        )
+    ),
+
+    llm_backoff_seconds=int(
+        os.getenv(
+            "LLM_BACKOFF_SECONDS",
+            "3"
+        )
     )
 )

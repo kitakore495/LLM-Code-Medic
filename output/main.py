@@ -5,8 +5,9 @@ def run_pipeline():
     print("🚀 启动自动化数据处理流水线...")
     
     input_data = 100
-    current_weight = 11  # 修改为11避免除零错误
+    current_weight = 11  # 修复：调整权重值以避免 utils 内部的除零错误
     
+    # 修复：调用正确的函数名并传入所有必需参数
     print("[Main] 正在调用底层工具链...")
     result = utils.execute_computation(input_data, current_weight)
     

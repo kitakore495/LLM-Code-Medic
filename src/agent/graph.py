@@ -52,10 +52,9 @@ from src.llm.provider_router import (
     ProviderRouter
 )
 
-from src.llm.model_factory import (
-    ModelFactory
+from src.llm.llm_invoker import (
+    LLMInvoker
 )
-
 
 # =========================================================
 # 状态结构
@@ -144,9 +143,8 @@ def parse_patch_response(
 
     return repo_updates
 
-
 # =========================================================
-# Diagnose LLM
+# Diagnose Config
 # =========================================================
 def create_diagnose_llm():
 
@@ -171,17 +169,11 @@ def create_diagnose_llm():
     )
 
     return (
-        ModelFactory
-        .create_llm(
-            provider=provider,
-            model_name=model_name,
-            temperature=0.2
-        )
+        provider,
+        model_name
     )
-
-
 # =========================================================
-# Repair LLM
+# Repair Config
 # =========================================================
 def create_repair_llm():
 
@@ -206,12 +198,8 @@ def create_repair_llm():
     )
 
     return (
-        ModelFactory
-        .create_llm(
-            provider=provider,
-            model_name=model_name,
-            temperature=0.2
-        )
+        provider,
+        model_name
     )
 # =========================================================
 # Diagnose Node
@@ -226,7 +214,10 @@ def diagnose_node(
         f"轮诊断..."
     )
 
-    llm = (
+    (
+        provider,
+        model_name
+    ) = (
         create_diagnose_llm()
     )
 
@@ -269,16 +260,24 @@ def diagnose_node(
 请进行根因诊断。
 """.strip()
 
-    response = llm.invoke([
-        SystemMessage(
-            content=(
-                DIAGNOSE_SYSTEM_PROMPT
-            )
-        ),
-        HumanMessage(
-            content=user_prompt
+    response = (
+        LLMInvoker
+        .invoke(
+            provider=provider,
+            model_name=model_name,
+            messages=[
+                SystemMessage(
+                    content=(
+                        DIAGNOSE_SYSTEM_PROMPT
+                    )
+                ),
+                HumanMessage(
+                    content=user_prompt
+                )
+            ],
+            temperature=0.2
         )
-    ])
+    )
 
     analysis = (
         response.content
@@ -359,8 +358,6 @@ def diagnose_node(
                 "attempts"
             ] + 1
     }
-
-
 # =========================================================
 # Repair Node
 # =========================================================
@@ -373,7 +370,10 @@ def repair_node(
         "正在生成多文件补丁..."
     )
 
-    llm = (
+    (
+        provider,
+        model_name
+    ) = (
         create_repair_llm()
     )
 
@@ -429,16 +429,24 @@ def repair_node(
 4. 严格遵守 FILE_PATH 协议
 """.strip()
 
-    response = llm.invoke([
-        SystemMessage(
-            content=(
-                REPAIR_SYSTEM_PROMPT
-            )
-        ),
-        HumanMessage(
-            content=user_prompt
+    response = (
+        LLMInvoker
+        .invoke(
+            provider=provider,
+            model_name=model_name,
+            messages=[
+                SystemMessage(
+                    content=(
+                        REPAIR_SYSTEM_PROMPT
+                    )
+                ),
+                HumanMessage(
+                    content=user_prompt
+                )
+            ],
+            temperature=0.2
         )
-    ])
+    )
 
     raw_patch = (
         response.content
