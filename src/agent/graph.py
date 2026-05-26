@@ -60,6 +60,9 @@ from src.quality.patch_quality_gate import (
     PatchQualityGate
 )
 
+from src.quality.semantic_patch_gate import (
+    SemanticPatchGate
+)
 # =========================================================
 # 状态结构
 # =========================================================
@@ -71,15 +74,38 @@ class AgentState(TypedDict):
 
     error_message: str
 
-    target_files: List[str]
+    target_files: List[
+        str
+    ]
 
-    repo_files: Dict[str, str]
+    repo_files: Dict[
+        str,
+        str
+    ]
 
     attempts: int
 
     is_fixed: bool
 
     analysis: str
+
+    # =====================================================
+    # Sandbox
+    # =====================================================
+    sandbox_stdout: str
+    sandbox_stderr: str
+
+    # =====================================================
+    # Patch Quality Gate
+    # =====================================================
+    patch_quality_passed: bool
+    patch_quality_reason: str
+
+    # =====================================================
+    # Semantic Patch Gate
+    # =====================================================
+    semantic_gate_passed: bool
+    semantic_gate_reason: str
 
 
 # =========================================================
@@ -539,7 +565,9 @@ def verify_node(
         "error_message":
             error_log
     }
-
+# =========================================================
+# Patch Quality Gate Node
+# =========================================================
 def patch_quality_gate_node(
     state: AgentState
 ):
@@ -558,28 +586,22 @@ def patch_quality_gate_node(
         ""
     )
 
-    sandbox_stdout = state.get(
-        "sandbox_stdout",
-        ""
-    )
-
-    sandbox_stderr = state.get(
-        "sandbox_stderr",
-        ""
-    )
-    
     gate = PatchQualityGate()
 
     passed, reason = (
         gate.check(
             analysis=analysis,
+
+            # 如果暂时没有初始快照
             original_files={},
+
             repaired_files=repo_files,
+
             target_files=state.get(
                 "target_files",
                 []
             )
-        )  
+        )
     )
 
     if passed:
@@ -593,18 +615,89 @@ def patch_quality_gate_node(
 
         print(
             "❌ [Patch Quality Gate] "
-            f"检查失败: {reason}"
+            f"检查失败: "
+            f"{reason}"
         )
 
-    state[
-        "patch_quality_passed"
-    ] = passed
+    return {
+        **state,
 
-    state[
-        "patch_quality_reason"
-    ] = reason
+        "patch_quality_passed":
+            passed,
 
-    return state
+        "patch_quality_reason":
+            reason
+    }
+
+# =========================================================
+# Semantic Patch Gate Node
+# =========================================================
+def semantic_patch_gate_node(
+    state: AgentState
+):
+
+    print(
+        "\n🧠 [Semantic Patch Gate] "
+        "正在检查语义补丁质量..."
+    )
+
+    result = (
+        SemanticPatchGate
+        .evaluate(
+            repo_files=state[
+                "repo_files"
+            ],
+
+            analysis=state.get(
+                "analysis",
+                ""
+            ),
+
+            patch=state.get(
+                "patch",
+                ""
+            )
+        )
+    )
+
+    passed = (
+        result[
+            "passed"
+        ]
+    )
+
+    reason = (
+        result[
+            "reason"
+        ]
+    )
+
+    if passed:
+
+        print(
+            "✅ [Semantic Patch Gate] "
+            "检查通过"
+        )
+
+    else:
+
+        print(
+            "❌ [Semantic Patch Gate] "
+            "检查失败"
+        )
+
+        print(
+            f"原因: {reason}"
+        )
+
+    return {
+
+        "semantic_gate_passed":
+        passed,
+
+        "semantic_gate_reason":
+        reason
+    }
 # =========================================================
 # Continue Router
 # =========================================================
@@ -630,7 +723,7 @@ def should_continue(
 
     return "diagnose"
 # =========================================================
-# Patch Quality Gate Router
+# Patch Gate Route
 # =========================================================
 def should_continue_after_patch_gate(
     state: AgentState
@@ -638,23 +731,51 @@ def should_continue_after_patch_gate(
 
     passed = state.get(
         "patch_quality_passed",
-        True
+        False
     )
 
     if passed:
 
         print(
-            "✅ [Gate] Patch Quality 通过"
+            "✅ [Gate] "
+            "Patch Quality 通过"
+        )
+
+        return (
+            "semantic_patch_gate"
+        )
+
+    print(
+        "❌ [Gate] "
+        "Patch Quality "
+        "失败，重新修复"
+    )
+
+    return "repair"
+# =========================================================
+# Continue After Semantic Gate
+# =========================================================
+def should_continue_after_semantic_gate(
+    state: AgentState
+):
+
+    if state.get(
+        "semantic_gate_passed",
+        False
+    ):
+
+        print(
+            "✅ [Gate] "
+            "Semantic Patch "
+            "通过"
         )
 
         return "verify"
 
     print(
-        "❌ [Gate] Patch Quality 未通过"
-    )
-
-    print(
-        "🔁 返回 Repair 重试"
+        "❌ [Gate] "
+        "Semantic Patch "
+        "失败，重新修复"
     )
 
     return "repair"
@@ -686,6 +807,11 @@ def create_v4_medic_graph():
     )
 
     workflow.add_node(
+        "semantic_patch_gate",
+        semantic_patch_gate_node
+    )
+
+    workflow.add_node(
         "verify",
         verify_node
     )
@@ -703,7 +829,6 @@ def create_v4_medic_graph():
         "repair"
     )
 
-    # repair → quality gate
     workflow.add_edge(
         "repair",
         "patch_quality_gate"
@@ -716,8 +841,21 @@ def create_v4_medic_graph():
         "patch_quality_gate",
         should_continue_after_patch_gate,
         {
-            "verify": "verify",
-            "repair": "repair"
+            "repair": "repair",
+            "semantic_patch_gate":
+                "semantic_patch_gate"
+        }
+    )
+
+    # =====================================================
+    # Semantic Patch Gate
+    # =====================================================
+    workflow.add_conditional_edges(
+        "semantic_patch_gate",
+        should_continue_after_semantic_gate,
+        {
+            "repair": "repair",
+            "verify": "verify"
         }
     )
 
