@@ -28,6 +28,10 @@ from typing import TypedDict
 from typing import List
 from typing import Dict
 
+from src.agent.state import (
+    AgentState
+)
+
 from langgraph.graph import (
     StateGraph,
     START,
@@ -63,50 +67,6 @@ from src.quality.patch_quality_gate import (
 from src.quality.semantic_patch_gate import (
     SemanticPatchGate
 )
-# =========================================================
-# 状态结构
-# =========================================================
-class AgentState(TypedDict):
-
-    repo_root: str
-
-    project_map: str
-
-    error_message: str
-
-    target_files: List[
-        str
-    ]
-
-    repo_files: Dict[
-        str,
-        str
-    ]
-
-    attempts: int
-
-    is_fixed: bool
-
-    analysis: str
-
-    # =====================================================
-    # Sandbox
-    # =====================================================
-    sandbox_stdout: str
-    sandbox_stderr: str
-
-    # =====================================================
-    # Patch Quality Gate
-    # =====================================================
-    patch_quality_passed: bool
-    patch_quality_reason: str
-
-    # =====================================================
-    # Semantic Patch Gate
-    # =====================================================
-    semantic_gate_passed: bool
-    semantic_gate_reason: str
-
 
 # =========================================================
 # PATCH PARSER
@@ -251,6 +211,9 @@ def diagnose_node(
         create_diagnose_llm()
     )
 
+    # =====================================================
+    # Repo Snapshot
+    # =====================================================
     repo_snapshot = []
 
     for (
@@ -275,8 +238,22 @@ def diagnose_node(
         )
     )
 
+    # =====================================================
+    # Repair History
+    # =====================================================
+    repair_history_text = "\n\n".join(
+
+        state.get(
+            "repair_history",
+            []
+        )
+    )
+
+    # =====================================================
+    # Prompt
+    # =====================================================
     user_prompt = f"""
-请分析当前软件项目：
+请分析当前软件项目。
 
 【AST 全景地图】
 {state["project_map"]}
@@ -284,23 +261,70 @@ def diagnose_node(
 【仓库源码快照】
 {repo_snapshot_text}
 
-【当前错误】
+【当前运行失败信息】
 {state["error_message"]}
 
-请进行根因诊断。
+【Patch Gate Failure】
+{state.get("patch_quality_reason", "")}
+
+【Semantic Gate Failure】
+{state.get("semantic_gate_reason", "")}
+
+【历史失败修复】
+{repair_history_text}
+
+请进行：
+
+慢思考根因诊断（Slow Thinking）。
+
+要求：
+
+1. 不要只修 traceback 最后一行
+2. 不要重复失败 patch
+3. 不要 workaround
+4. 不要修改 magic number
+5. 不要修改公式绕过问题
+6. 必须关注 stdout 是否异常
+7. 必须修复真实根因
+8. 必须进行跨文件调用链分析
+9. 必须进行 runtime 风险分析
+10. 必须判断 previous repair 是否只是 workaround
+
+特别注意：
+
+程序“运行成功”
+≠
+修复成功。
+
+stdout 异常：
+
+依然属于失败。
+
+如果 semantic gate 拒绝了 patch：
+
+必须主动思考：
+
+为什么被拒绝？
+
+不能重复生成同类 patch。
 """.strip()
 
+    # =====================================================
+    # LLM Diagnose
+    # =====================================================
     response = (
         LLMInvoker
         .invoke(
             provider=provider,
             model_name=model_name,
             messages=[
+
                 SystemMessage(
                     content=(
                         DIAGNOSE_SYSTEM_PROMPT
                     )
                 ),
+
                 HumanMessage(
                     content=user_prompt
                 )
@@ -313,6 +337,9 @@ def diagnose_node(
         response.content
     )
 
+    # =====================================================
+    # Parse TARGET_FILES
+    # =====================================================
     target_files = []
 
     match = re.search(
@@ -337,7 +364,9 @@ def diagnose_node(
 
             target_files = []
 
-    # 防御式路径清洗
+    # =====================================================
+    # Defensive Path Cleanup
+    # =====================================================
     cleaned = []
 
     for path in target_files:
@@ -377,6 +406,8 @@ def diagnose_node(
 
     return {
 
+        **state,
+
         "analysis":
             analysis,
 
@@ -407,6 +438,9 @@ def repair_node(
         create_repair_llm()
     )
 
+    # =====================================================
+    # Repo Snapshot
+    # =====================================================
     repo_snapshot = []
 
     for (
@@ -442,6 +476,21 @@ def repair_node(
         )
     )
 
+    # =====================================================
+    # Repair History
+    # =====================================================
+    repair_history_text = (
+        "\n\n".join(
+            state.get(
+                "repair_history",
+                []
+            )
+        )
+    )
+
+    # =====================================================
+    # Prompt
+    # =====================================================
     user_prompt = f"""
 请修复当前项目。
 
@@ -451,25 +500,106 @@ def repair_node(
 【需要修复的源码】
 {repo_snapshot_text}
 
+【Patch Gate Failure】
+{state.get(
+    "patch_quality_reason",
+    ""
+)}
+
+【Semantic Gate Failure】
+{state.get(
+    "semantic_gate_reason",
+    ""
+)}
+
+【历史失败修复】
+{repair_history_text}
+
+【最近一次 stdout】
+{state.get(
+    "sandbox_stdout",
+    ""
+)}
+
+【最近一次 stderr】
+{state.get(
+    "sandbox_stderr",
+    ""
+)}
+
+重要：
+
+程序运行成功
+≠
+修复成功。
+
+如果 semantic gate 拒绝：
+
+你必须主动思考：
+
+为什么失败？
+
+禁止重复 patch。
+
+禁止 workaround。
+
+禁止 magic number 修复。
+
+禁止公式修改。
+
+禁止：
+
+10 → 20
+
+9 → 8
+
+x / y
+
+↓
+
+x / (y + 1)
+
+禁止：
+
+except: pass
+
+return True
+
+return None
+
+max()
+
+min()
+
+必须：
+
+修复真实根因。
+
 要求：
 
 1. 输出完整文件
 2. 仅修改必要文件
-3. 不允许解释
+3. 严禁解释
 4. 严格遵守 FILE_PATH 协议
+5. 不允许重复历史失败 patch
 """.strip()
 
+    # =====================================================
+    # LLM Repair
+    # =====================================================
     response = (
         LLMInvoker
         .invoke(
             provider=provider,
             model_name=model_name,
             messages=[
+
                 SystemMessage(
                     content=(
                         REPAIR_SYSTEM_PROMPT
                     )
                 ),
+
                 HumanMessage(
                     content=user_prompt
                 )
@@ -496,6 +626,32 @@ def repair_node(
         "========================================="
     )
 
+    # =====================================================
+    # Save History
+    # =====================================================
+    history = state.get(
+        "repair_history",
+        []
+    )
+
+    history.append(
+        f"""
+[LLM PATCH]
+
+attempt:
+{state.get(
+    "repair_attempts",
+    0
+)}
+
+patch:
+{raw_patch}
+""".strip()
+    )
+
+    # =====================================================
+    # Parse Patch
+    # =====================================================
     updates = (
         parse_patch_response(
             raw_patch
@@ -513,8 +669,14 @@ def repair_node(
     )
 
     return {
+
+        **state,
+
         "repo_files":
-            merged_repo_files
+            merged_repo_files,
+
+        "repair_history":
+            history
     }
 # =========================================================
 # Verify Node
@@ -536,15 +698,94 @@ def verify_node(
         )
     )
 
-    success, error_log = (
-        executor
-        .run_v3_validation(
+    (
+        success,
+        error_log,
+        stdout,
+        stderr
+    ) = (
+        executor.run_v3_validation(
             state[
                 "repo_files"
             ]
         )
     )
 
+    # =====================================================
+    # Semantic Runtime Check
+    # =====================================================
+    suspicious = False
+    suspicious_reason = ""
+
+    stdout_lower = (
+        stdout.lower()
+        if stdout
+        else ""
+    )
+
+    suspicious_patterns = [
+
+        "159.0",
+
+        "nan",
+
+        "inf",
+
+        "none",
+
+        "true"
+    ]
+
+    for item in suspicious_patterns:
+
+        if item in stdout_lower:
+
+            suspicious = True
+
+            suspicious_reason = (
+                f"stdout "
+                f"出现可疑输出: "
+                f"{item}"
+            )
+
+            break
+
+    # =====================================================
+    # Fake Success
+    # =====================================================
+    if success and suspicious:
+
+        print(
+            "⚠️ [Verify] "
+            "程序运行成功，"
+            "但检测到可疑语义输出"
+        )
+
+        print(
+            f"原因: "
+            f"{suspicious_reason}"
+        )
+
+        return {
+
+            **state,
+
+            "is_fixed":
+                False,
+
+            "error_message":
+                suspicious_reason,
+
+            "sandbox_stdout":
+                stdout,
+
+            "sandbox_stderr":
+                stderr
+        }
+
+    # =====================================================
+    # Success
+    # =====================================================
     if success:
 
         print(
@@ -559,11 +800,19 @@ def verify_node(
 
     return {
 
+        **state,
+
         "is_fixed":
             success,
 
         "error_message":
-            error_log
+            error_log,
+
+        "sandbox_stdout":
+            stdout,
+
+        "sandbox_stderr":
+            stderr
     }
 # =========================================================
 # Patch Quality Gate Node
@@ -577,25 +826,24 @@ def patch_quality_gate_node(
         "正在检查补丁质量..."
     )
 
-    repo_files = state[
-        "repo_files"
-    ]
-
-    analysis = state.get(
-        "analysis",
-        ""
-    )
-
     gate = PatchQualityGate()
 
     passed, reason = (
         gate.check(
-            analysis=analysis,
+            analysis=state.get(
+                "analysis",
+                ""
+            ),
 
-            # 如果暂时没有初始快照
-            original_files={},
+            original_files=state.get(
+                "original_repo_files",
+                {}
+            ),
 
-            repaired_files=repo_files,
+            repaired_files=state.get(
+                "repo_files",
+                {}
+            ),
 
             target_files=state.get(
                 "target_files",
@@ -620,6 +868,7 @@ def patch_quality_gate_node(
         )
 
     return {
+
         **state,
 
         "patch_quality_passed":
@@ -628,7 +877,6 @@ def patch_quality_gate_node(
         "patch_quality_reason":
             reason
     }
-
 # =========================================================
 # Semantic Patch Gate Node
 # =========================================================
@@ -641,35 +889,33 @@ def semantic_patch_gate_node(
         "正在检查语义补丁质量..."
     )
 
-    result = (
-        SemanticPatchGate
-        .evaluate(
-            repo_files=state[
-                "repo_files"
-            ],
+    gate = (
+        SemanticPatchGate()
+    )
+
+    passed, reason = (
+        gate.check(
+
+            repo_files=state.get(
+                "repo_files",
+                {}
+            ),
+
+            original_repo_files=state.get(
+                "original_repo_files",
+                {}
+            ),
 
             analysis=state.get(
                 "analysis",
                 ""
             ),
 
-            patch=state.get(
-                "patch",
-                ""
+            target_files=state.get(
+                "target_files",
+                []
             )
         )
-    )
-
-    passed = (
-        result[
-            "passed"
-        ]
-    )
-
-    reason = (
-        result[
-            "reason"
-        ]
     )
 
     if passed:
@@ -692,11 +938,13 @@ def semantic_patch_gate_node(
 
     return {
 
+        **state,
+
         "semantic_gate_passed":
-        passed,
+            passed,
 
         "semantic_gate_reason":
-        reason
+            reason
     }
 # =========================================================
 # Continue Router
@@ -745,24 +993,94 @@ def should_continue_after_patch_gate(
             "semantic_patch_gate"
         )
 
+    # =====================================================
+    # Retry Count
+    # =====================================================
+    attempts = state.get(
+        "repair_attempts",
+        0
+    )
+
+    attempts += 1
+
+    state[
+        "repair_attempts"
+    ] = attempts
+
     print(
         "❌ [Gate] "
         "Patch Quality "
         "失败，重新修复"
     )
 
+    print(
+        f"🔁 当前重修次数: "
+        f"{attempts}/5"
+    )
+
+    # =====================================================
+    # Record Failure History
+    # =====================================================
+    history = state.get(
+        "repair_history",
+        []
+    )
+
+    history.append(
+        f"""
+[Patch Gate Failure]
+
+attempt:
+{attempts}
+
+reason:
+{state.get(
+    "patch_quality_reason",
+    ""
+)}
+
+analysis:
+{state.get(
+    "analysis",
+    ""
+)}
+""".strip()
+    )
+
+    state[
+        "repair_history"
+    ] = history
+
+    # =====================================================
+    # Stop Condition
+    # =====================================================
+    if attempts >= 5:
+
+        print(
+            "💀 超过最大修复次数"
+        )
+
+        return "__end__"
+
     return "repair"
+
+
 # =========================================================
-# Continue After Semantic Gate
+# Semantic Patch Gate Route
 # =========================================================
 def should_continue_after_semantic_gate(
     state: AgentState
 ):
 
-    if state.get(
+    passed = state.get(
         "semantic_gate_passed",
         False
-    ):
+    )
+
+    # =====================================================
+    # Passed
+    # =====================================================
+    if passed:
 
         print(
             "✅ [Gate] "
@@ -772,11 +1090,86 @@ def should_continue_after_semantic_gate(
 
         return "verify"
 
+    # =====================================================
+    # Retry Count
+    # =====================================================
+    attempts = state.get(
+        "repair_attempts",
+        0
+    )
+
+    attempts += 1
+
+    state[
+        "repair_attempts"
+    ] = attempts
+
     print(
         "❌ [Gate] "
         "Semantic Patch "
         "失败，重新修复"
     )
+
+    print(
+        f"🔁 当前重修次数: "
+        f"{attempts}/5"
+    )
+
+    # =====================================================
+    # Record Failure History
+    # =====================================================
+    history = state.get(
+        "repair_history",
+        []
+    )
+
+    history.append(
+        f"""
+[Semantic Patch Failure]
+
+attempt:
+{attempts}
+
+reason:
+{state.get(
+    "semantic_gate_reason",
+    ""
+)}
+
+analysis:
+{state.get(
+    "analysis",
+    ""
+)}
+
+stdout:
+{state.get(
+    "sandbox_stdout",
+    ""
+)}
+
+stderr:
+{state.get(
+    "sandbox_stderr",
+    ""
+)}
+""".strip()
+    )
+
+    state[
+        "repair_history"
+    ] = history
+
+    # =====================================================
+    # Stop Condition
+    # =====================================================
+    if attempts >= 5:
+
+        print(
+            "💀 超过最大修复次数"
+        )
+
+        return "__end__"
 
     return "repair"
 # =========================================================

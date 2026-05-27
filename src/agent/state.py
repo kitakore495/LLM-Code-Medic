@@ -1,63 +1,50 @@
 from typing import TypedDict
 from typing import Dict
 from typing import List
-from typing import Optional
 
 
-class AgentState(
-    TypedDict
-):
+class AgentState(TypedDict):
 
-    # =====================================================
-    # Repo
-    # =====================================================
+    repo_root: str
+
+    project_map: str
+
+    error_message: str
+
+    target_files: List[str]
+
     repo_files: Dict[
         str,
         str
     ]
 
-    ast_map: Dict
-
-    target_files: List[
+    original_repo_files: Dict[
+        str,
         str
     ]
 
-    entry_file: str
+    attempts: int
 
-    # =====================================================
-    # Diagnose
-    # =====================================================
+    repair_attempts: int
+
+    is_fixed: bool
+
     analysis: str
 
     # =====================================================
-    # Repair
+    # Sandbox
     # =====================================================
-    patch: str
-
-    repair_round: int
-
-    # =====================================================
-    # Verify
-    # =====================================================
-    verification_passed: bool
-
-    verification_output: str
+    sandbox_stdout: str
+    sandbox_stderr: str
 
     # =====================================================
     # Patch Quality Gate
     # =====================================================
-    patch_gate_passed: bool
-
-    patch_gate_reason: str
+    patch_quality_passed: bool
+    patch_quality_reason: str
 
     # =====================================================
     # Semantic Patch Gate
     # =====================================================
     semantic_gate_passed: bool
-
     semantic_gate_reason: str
-
-    # =====================================================
-    # Runtime
-    # =====================================================
-    done: bool

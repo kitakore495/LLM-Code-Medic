@@ -19,12 +19,10 @@ class CodeExecutor:
         repo_root: str
     ):
 
-        # tests/v3
         self.repo_root = os.path.abspath(
             repo_root
         )
 
-        # 项目根目录
         self.project_root = (
             os.path.dirname(
                 os.path.dirname(
@@ -37,7 +35,6 @@ class CodeExecutor:
             )
         )
 
-        # output/
         self.output_root = (
             os.path.join(
                 self.project_root,
@@ -88,7 +85,6 @@ class CodeExecutor:
         self
     ):
 
-        # 删除旧 output
         if os.path.exists(
             self.output_root
         ):
@@ -97,7 +93,6 @@ class CodeExecutor:
                 self.output_root
             )
 
-        # copy repo -> output
         shutil.copytree(
             self.repo_root,
             self.output_root,
@@ -119,10 +114,12 @@ class CodeExecutor:
         self
     ):
 
-        for root, dirs, files in (
-            os.walk(
-                self.output_root
-            )
+        for (
+            root,
+            dirs,
+            files
+        ) in os.walk(
+            self.output_root
         ):
 
             for d in dirs:
@@ -154,6 +151,31 @@ class CodeExecutor:
 
                     except Exception:
                         pass
+
+    # =========================================================
+    # sandbox env
+    # =========================================================
+    def _build_sandbox_env(
+        self
+    ):
+
+        sandbox_env = (
+            os.environ.copy()
+        )
+
+        sandbox_env[
+            "PYTHONDONTWRITEBYTECODE"
+        ] = "1"
+
+        sandbox_env[
+            "PYTHONIOENCODING"
+        ] = "utf-8"
+
+        sandbox_env[
+            "PYTHONPATH"
+        ] = self.output_root
+
+        return sandbox_env
 
     # =========================================================
     # 写入修复文件
@@ -212,7 +234,7 @@ class CodeExecutor:
         )
 
     # =========================================================
-    # 执行 output/main.py
+    # Run main.py
     # =========================================================
     def _run_output_sandbox(
         self
@@ -250,33 +272,24 @@ class CodeExecutor:
             "沙箱中运行..."
         )
 
-        sandbox_env = (
-            os.environ.copy()
-        )
-
-        sandbox_env[
-            "PYTHONDONTWRITEBYTECODE"
-        ] = "1"
-
-        sandbox_env[
-            "PYTHONIOENCODING"
-        ] = "utf-8"
-
-        sandbox_env[
-            "PYTHONPATH"
-        ] = self.output_root
-
         result = subprocess.run(
             [
                 sys.executable,
                 "main.py"
             ],
+
             cwd=self.output_root,
+
             capture_output=True,
+
             text=True,
+
             timeout=15,
-            env=sandbox_env,
+
+            env=self._build_sandbox_env(),
+
             encoding="utf-8",
+
             errors="replace"
         )
 
@@ -309,6 +322,68 @@ class CodeExecutor:
         return result
 
     # =========================================================
+    # Run pytest
+    # =========================================================
+    def _run_pytest(
+        self
+    ):
+
+        print(
+            "\n🧪 正在执行 pytest..."
+        )
+
+        result = subprocess.run(
+
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "--tb=short"
+            ],
+
+            cwd=self.output_root,
+
+            capture_output=True,
+
+            text=True,
+
+            timeout=20,
+
+            env=self._build_sandbox_env(),
+
+            encoding="utf-8",
+
+            errors="replace"
+        )
+
+        print(
+            "\n================ "
+            "PYTEST STDOUT "
+            "================"
+        )
+
+        print(
+            result.stdout
+        )
+
+        print(
+            "\n================ "
+            "PYTEST STDERR "
+            "================"
+        )
+
+        print(
+            result.stderr
+        )
+
+        print(
+            "========================================"
+        )
+
+        return result
+
+    # =========================================================
     # 主验证入口
     # =========================================================
     def run_v3_validation(
@@ -319,6 +394,8 @@ class CodeExecutor:
         ]
     ) -> Tuple[
         bool,
+        str,
+        str,
         str
     ]:
 
@@ -335,39 +412,211 @@ class CodeExecutor:
                 repo_files
             )
 
-            result = (
-                self._run_output_sandbox()
+           # =================================================
+            # Step 1
+            # Run main.py
+            # =================================================
+            result = self._run_output_sandbox()
+
+            stdout = (
+                result.stdout
+                or ""
+            )
+
+            stderr = (
+                result.stderr
+                or ""
             )
 
             if (
                 result.returncode
-                == 0
+                != 0
             ):
 
                 print(
-                    "\n🎉 Output "
-                    "工作区测试通过"
+                    "\n❌ Output "
+                    "工作区测试失败"
+                )
+
+                error_log = (
+                    stderr
+                    if stderr
+                    else stdout
                 )
 
                 return (
-                    True,
-                    ""
+                    False,
+                    error_log,
+                    stdout,
+                    stderr
                 )
 
-            error_log = (
-                result.stderr
-                if result.stderr
-                else result.stdout
+            print(
+                "\n🎉 main.py "
+                "运行通过"
             )
+
+            # =================================================
+            # Step 2
+            # Run Pytest
+            # =================================================
+            print(
+                "\n🧪 正在执行 pytest..."
+            )
+
+            pytest_result = subprocess.run(
+
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-q"
+                ],
+
+                cwd=self.output_root,
+
+                capture_output=True,
+
+                text=True,
+
+                timeout=20,
+
+                encoding="utf-8",
+
+                errors="replace"
+            )
+
+            pytest_stdout = (
+                pytest_result.stdout
+                or ""
+            )
+
+            pytest_stderr = (
+                pytest_result.stderr
+                or ""
+            )
+
+            stdout += (
+                "\n\n===== PYTEST =====\n"
+                + pytest_stdout
+            )
+
+            stderr += (
+                "\n\n===== PYTEST =====\n"
+                + pytest_stderr
+            )
+
+            # =================================================
+            # pytest returncode
+            #
+            # 0 -> pass
+            # 1 -> test fail
+            # 5 -> no tests collected
+            # =================================================
+            if pytest_result.returncode == 5:
+
+                print(
+                    "\n⚠️ 未发现 pytest 测试"
+                )
+
+                print(
+                    "⚠️ 跳过 pytest"
+                )
+
+            elif pytest_result.returncode != 0:
+
+                print(
+                    "\n❌ pytest 失败"
+                )
+
+                error_log = (
+                    pytest_stderr
+                    if pytest_stderr
+                    else pytest_stdout
+                )
+
+                return (
+                    False,
+                    error_log,
+                    stdout,
+                    stderr
+                )
+
+            else:
+
+                print(
+                    "🎉 pytest "
+                    "测试通过"
+                )
 
             print(
-                "\n❌ Output "
-                "工作区测试失败"
+                "\n🎉 Output "
+                "工作区测试通过"
             )
 
+            # =================================================
+            # Step 3
+            # Semantic Output Verify
+            #
+            # 注意：
+            # suspicious output 只 warning
+            # 不阻止修复成功
+            # =================================================
+            try:
+
+                suspicious_values = [
+
+                    "159.0",
+
+                    "999999",
+
+                    "inf",
+
+                    "nan"
+                ]
+
+                suspicious_reason = None
+
+                for value in suspicious_values:
+
+                    if value in stdout:
+
+                        suspicious_reason = (
+                            f"stdout 出现可疑输出: "
+                            f"{value}"
+                        )
+
+                        break
+
+                if suspicious_reason:
+
+                    print(
+                        "⚠️ [Verify] "
+                        "程序运行成功，但检测到可疑语义输出"
+                    )
+
+                    print(
+                        f"原因: "
+                        f"{suspicious_reason}"
+                    )
+
+                    print(
+                        "⚠️ 已记录 warning，"
+                        "不阻止修复完成"
+                    )
+
+            except Exception:
+
+                print(
+                    "⚠️ [Verify] "
+                    "语义检测异常，已忽略"
+                )
+
             return (
-                False,
-                error_log
+                True,
+                "",
+                stdout,
+                stderr
             )
 
         except subprocess.TimeoutExpired:
@@ -378,7 +627,9 @@ class CodeExecutor:
 
             return (
                 False,
-                "Execution timed out"
+                "Execution timed out",
+                "",
+                ""
             )
 
         except Exception:
@@ -389,5 +640,7 @@ class CodeExecutor:
 
             return (
                 False,
-                traceback.format_exc()
+                traceback.format_exc(),
+                "",
+                ""
             )

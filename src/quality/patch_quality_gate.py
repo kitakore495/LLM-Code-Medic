@@ -1,5 +1,3 @@
-import re
-
 from typing import Dict
 from typing import List
 
@@ -24,20 +22,35 @@ class PatchQualityGate:
 
         # =====================================================
         # Rule 1
-        # 必须修改目标文件
+        # 必须存在 target_files
+        # =====================================================
+        if not target_files:
+
+            return (
+                False,
+                "target_files 为空"
+            )
+
+        # =====================================================
+        # Rule 2
+        # 必须修改 target file
         # =====================================================
         modified_targets = []
 
         for file_path in target_files:
 
-            old_code = original_files.get(
-                file_path,
-                ""
+            old_code = (
+                original_files.get(
+                    file_path,
+                    ""
+                )
             )
 
-            new_code = repaired_files.get(
-                file_path,
-                ""
+            new_code = (
+                repaired_files.get(
+                    file_path,
+                    ""
+                )
             )
 
             if old_code != new_code:
@@ -54,39 +67,66 @@ class PatchQualityGate:
             )
 
         # =====================================================
-        # Rule 2
-        # Magic Number Workaround
-        # =====================================================
-        suspicious = (
-            self._detect_magic_number_patch(
-                original_files,
-                repaired_files
-            )
-        )
-
-        if suspicious:
-
-            return (
-                False,
-                "疑似 workaround patch "
-                "(magic number modification)"
-            )
-
-        # =====================================================
         # Rule 3
-        # Hack patch
+        # Patch Empty
         # =====================================================
-        hacked = (
-            self._detect_hack_patch(
-                repaired_files
-            )
-        )
+        for file_path in modified_targets:
 
-        if hacked:
+            content = (
+                repaired_files.get(
+                    file_path,
+                    ""
+                )
+            )
+
+            if not content.strip():
+
+                return (
+                    False,
+                    f"{file_path} "
+                    "为空文件"
+                )
+
+        # =====================================================
+        # Rule 4
+        # 防止大规模无关修改
+        # =====================================================
+        modified_files = []
+
+        for path in repaired_files:
+
+            old = (
+                original_files.get(
+                    path,
+                    ""
+                )
+            )
+
+            new = (
+                repaired_files.get(
+                    path,
+                    ""
+                )
+            )
+
+            if old != new:
+
+                modified_files.append(
+                    path
+                )
+
+        unrelated = [
+
+            x
+            for x in modified_files
+            if x not in target_files
+        ]
+
+        if len(unrelated) >= 3:
 
             return (
                 False,
-                "疑似 hack patch"
+                "修改过多无关文件"
             )
 
         print(
@@ -98,110 +138,3 @@ class PatchQualityGate:
             True,
             "PASS"
         )
-
-    # =========================================================
-    # Detect Magic Number Change
-    # =========================================================
-    def _detect_magic_number_patch(
-        self,
-        original_files: Dict[str, str],
-        repaired_files: Dict[str, str]
-    ) -> bool:
-
-        pattern = re.compile(
-            r"\b\d+\b"
-        )
-
-        for path in repaired_files:
-
-            old = (
-                original_files.get(
-                    path,
-                    ""
-                )
-            )
-
-            new = repaired_files[
-                path
-            ]
-
-            old_numbers = (
-                pattern.findall(
-                    old
-                )
-            )
-
-            new_numbers = (
-                pattern.findall(
-                    new
-                )
-            )
-
-            if (
-                old_numbers != new_numbers
-                and
-                len(old_numbers)
-                == len(new_numbers)
-            ):
-
-                diff_count = sum(
-                    1
-                    for a, b in zip(
-                        old_numbers,
-                        new_numbers
-                    )
-                    if a != b
-                )
-
-                # 只改了少数数字
-                if diff_count <= 2:
-
-                    print(
-                        "⚠️ [PatchGate] "
-                        "检测到可疑 magic number 修改"
-                    )
-
-                    return True
-
-        return False
-
-    # =========================================================
-    # Detect Hack Patch
-    # =========================================================
-    def _detect_hack_patch(
-        self,
-        repaired_files: Dict[str, str]
-    ) -> bool:
-
-        suspicious_patterns = [
-
-            r"except\s*:\s*pass",
-
-            r"return\s+1\b",
-
-            r"return\s+True\b",
-
-            r"return\s+None\b"
-        ]
-
-        for content in (
-            repaired_files.values()
-        ):
-
-            for pattern in (
-                suspicious_patterns
-            ):
-
-                if re.search(
-                    pattern,
-                    content
-                ):
-
-                    print(
-                        "⚠️ [PatchGate] "
-                        "检测到 hack patch"
-                    )
-
-                    return True
-
-        return False

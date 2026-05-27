@@ -180,16 +180,45 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
             "target_files":
                 [],
 
+            # 当前仓库
             "repo_files":
-                initial_repo_files,
+                initial_repo_files.copy(),
+
+            # 原始快照（Gate比较用）
+            "original_repo_files":
+                initial_repo_files.copy(),
 
             "attempts":
+                0,
+
+            "repair_attempts":
                 0,
 
             "is_fixed":
                 False,
 
             "analysis":
+                "",
+
+            # sandbox
+            "sandbox_stdout":
+                "",
+
+            "sandbox_stderr":
+                "",
+
+            # patch gate
+            "patch_quality_passed":
+                False,
+
+            "patch_quality_reason":
+                "",
+
+            # semantic gate
+            "semantic_gate_passed":
+                False,
+
+            "semantic_gate_reason":
                 ""
         }
 
