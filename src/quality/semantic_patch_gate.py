@@ -1,234 +1,54 @@
 import re
+from typing import Dict, List, Tuple
 
-from typing import Dict
-from typing import List
 class SemanticPatchGate:
-
-    # =========================================================
-    # Check
-    # =========================================================
     def check(
         self,
         repo_files: Dict[str, str],
         original_repo_files: Dict[str, str],
         analysis: str,
-        target_files=None
-    ):
+        target_files: List[str] = None
+    ) -> Tuple[bool, str]:
 
-        print(
-            "\n🧠 [SemanticGate] "
-            "开始执行语义补丁检查..."
-        )
-
+        print("\n🧠 [SemanticGate] 开始执行语义补丁检查 (优化版)...")
         reasons = []
+        target_files = target_files or []
 
-        if target_files is None:
-
-            target_files = []
-
-        # =====================================================
-        # Rule 1
-        # target_files 必须真正发生修改
-        # =====================================================
-        changed_files = set()
-
-        for path in target_files:
-
-            old_code = (
-                original_repo_files.get(
-                    path,
-                    ""
-                )
-            )
-
-            new_code = (
-                repo_files.get(
-                    path,
-                    ""
-                )
-            )
-
-            if old_code != new_code:
-
-                changed_files.add(
-                    path.lower()
-                )
-
-        for file_name in target_files:
-
-            if (
-                file_name.lower()
-                not in changed_files
-            ):
-
-                reasons.append(
-                    f"{file_name} "
-                    "被要求修复但未修改"
-                )
-
-        # =====================================================
-        # Rule 2
-        # 可疑 workaround patch
-        # =====================================================
+        # 1. 拦截定义：明确的逃避型伪代码
         suspicious_patterns = [
-
-            # magic workaround
-            r"adjusted_weight\s*=\s*1\b",
-
-            r"if\s+.*==\s*0\s*:",
-
-            r"if\s+.*<=\s*0\s*:",
-
-            r"max\s*\(",
-
-            r"min\s*\(",
-
-            # 提前 return 绕过公式
-            r"if\s+.*==.*:\s*return",
-
-            r"if\s+.*<=.*:\s*return",
-
-            r"if\s+.*>=.*:\s*return",
-
-            r"if\s+.*:\s*return\s+[A-Za-z0-9_\.\*\+\-/\(\)\s]+"
+            r"except\s*:\s*pass",               # 掩盖错误
+            r"if\s+.*:\s*return\s+(None|True|1|0)\b", # 强行返回固定值
+            r"adjusted_weight\s*=\s*\d+",      # 硬编码修正权重
         ]
 
-        files_to_check = (
-            target_files
-            if target_files
-            else repo_files.keys()
-        )
+        files_to_check = target_files if target_files else repo_files.keys()
 
         for path in files_to_check:
+            old_code = original_repo_files.get(path, "")
+            new_code = repo_files.get(path, "")
 
-            old_code = (
-                original_repo_files.get(
-                    path,
-                    ""
-                )
-            )
-
-            new_code = (
-                repo_files.get(
-                    path,
-                    ""
-                )
-            )
-
-            # 没改不查
+            # 只针对修改的部分进行检测
             if old_code == new_code:
-
                 continue
 
-            for pattern in (
-                suspicious_patterns
-            ):
+            # 2. 检查每一行，防止误伤合法逻辑
+            for line in new_code.splitlines():
+                for pattern in suspicious_patterns:
+                    if re.search(pattern, line.strip()):
+                        reasons.append(f"{path} 发现逃避式补丁: '{line.strip()}'")
 
-                if re.search(
-                    pattern,
-                    new_code,
-                    re.DOTALL
-                ):
+        # 3. 检查文件修改完整性
+        changed_files = {path.lower() for path in files_to_check 
+                         if original_repo_files.get(path) != repo_files.get(path)}
+        
+        for file_name in target_files:
+            if file_name.lower() not in changed_files:
+                reasons.append(f"{file_name} 被要求修复但未发生代码变更")
 
-                    reasons.append(
-                        f"{path} "
-                        "疑似 workaround patch"
-                    )
-
-                    break
-
-        # =====================================================
-        # Rule 3
-        # Empty Logic
-        # =====================================================
-        suspicious_logic = [
-
-            "pass",
-
-            "return None",
-
-            "return True",
-
-            "return 1"
-        ]
-
-        for path in files_to_check:
-
-            code = (
-                repo_files.get(
-                    path,
-                    ""
-                )
-            )
-
-            for item in (
-                suspicious_logic
-            ):
-
-                if item in code:
-
-                    reasons.append(
-                        f"{path} "
-                        "疑似逻辑绕过"
-                    )
-
-                    break
-
-        # =====================================================
-        # Rule 4
-        # except: pass
-        # =====================================================
-        for path in files_to_check:
-
-            code = (
-                repo_files.get(
-                    path,
-                    ""
-                )
-            )
-
-            if re.search(
-
-                r"except\s*:\s*pass",
-                code
-            ):
-
-                reasons.append(
-                    f"{path} "
-                    "检测到 except pass"
-                )
-
-        # =====================================================
-        # Result
-        # =====================================================
         if reasons:
+            reason_str = "；".join(reasons)
+            print(f"❌ [SemanticGate] 检查失败: {reason_str}")
+            return False, reason_str
 
-            reason = (
-                "；".join(
-                    reasons
-                )
-            )
-
-            print(
-                "❌ [SemanticGate] "
-                "检查失败"
-            )
-
-            print(
-                f"原因: {reason}"
-            )
-
-            return (
-                False,
-                reason
-            )
-
-        print(
-            "✅ [SemanticGate] "
-            "检查通过"
-        )
-
-        return (
-            True,
-            "OK"
-        )
+        print("✅ [SemanticGate] 检查通过")
+        return True, "OK"

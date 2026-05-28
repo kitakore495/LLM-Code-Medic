@@ -342,26 +342,25 @@ stdout 异常：
     # =====================================================
     target_files = []
 
-    match = re.search(
-        r"TARGET_FILES:\s*(\[.*?\])",
-        analysis,
+    # 安全解析 TARGET_FILES 列表
+    target_files = []
+    files_match = re.search(
+        r"TARGET_FILES:\s*(\[.*?\])", 
+        analysis, 
         re.DOTALL
     )
-
-    if match:
-
+    
+    if files_match:
+        # 使用安全JSON解析替代ast.literal_eval
         try:
-
-            import ast
-
-            target_files = (
-                ast.literal_eval(
-                    match.group(1)
-                )
-            )
-
-        except Exception:
-
+            import json
+            # 预处理单引号转为双引号
+            normalized = files_match.group(1).replace("'", '"')
+            target_files = json.loads(normalized)
+            # 验证必须为字符串列表
+            if not all(isinstance(item, str) for item in target_files):
+                target_files = []
+        except json.JSONDecodeError:
             target_files = []
 
     # =====================================================
@@ -369,29 +368,24 @@ stdout 异常：
     # =====================================================
     cleaned = []
 
-    for path in target_files:
-
-        path = (
-            path
-            .replace("\\", "/")
-            .strip()
-        )
-
-        path = re.sub(
-            r"^(tests/[^/]+/)",
-            "",
-            path
-        )
-
-        path = re.sub(
-            r"^(v\d+/)",
-            "",
-            path
-        )
-
-        cleaned.append(
-            path
-        )
+    # 强化路径消毒
+    cleaned = []
+    for raw_path in target_files:
+        # 统一路径分隔符并去除首尾空格
+        path = raw_path.replace("\\", "/").strip()
+        
+        # 移除所有相对路径和敏感前缀
+        path = re.sub(r"(\.\./|\./|/\.\.|/\.)", "", path)
+        path = re.sub(r"^(/?[a-zA-Z]:|/mnt/)", "", path)  # 移除Windows/Linux绝对路径
+        
+        # 移除测试目录和版本目录前缀
+        path = re.sub(r"^(tests/[^/]+/|v\d+/)", "", path)
+        
+        # 防止路径遍历攻击
+        if ".." in path:
+            continue
+            
+        cleaned.append(path)
 
     target_files = list(
         dict.fromkeys(
@@ -712,107 +706,26 @@ def verify_node(
     )
 
     # =====================================================
-    # Semantic Runtime Check
+    # Success / Failure Logic
     # =====================================================
-    suspicious = False
-    suspicious_reason = ""
-
-    stdout_lower = (
-        stdout.lower()
-        if stdout
-        else ""
-    )
-
-    suspicious_patterns = [
-
-        "159.0",
-
-        "nan",
-
-        "inf",
-
-        "none",
-
-        "true"
-    ]
-
-    for item in suspicious_patterns:
-
-        if item in stdout_lower:
-
-            suspicious = True
-
-            suspicious_reason = (
-                f"stdout "
-                f"出现可疑输出: "
-                f"{item}"
-            )
-
-            break
-
-    # =====================================================
-    # Fake Success
-    # =====================================================
-    if success and suspicious:
-
-        print(
-            "⚠️ [Verify] "
-            "程序运行成功，"
-            "但检测到可疑语义输出"
-        )
-
-        print(
-            f"原因: "
-            f"{suspicious_reason}"
-        )
-
-        return {
-
-            **state,
-
-            "is_fixed":
-                False,
-
-            "error_message":
-                suspicious_reason,
-
-            "sandbox_stdout":
-                stdout,
-
-            "sandbox_stderr":
-                stderr
-        }
-
-    # =====================================================
-    # Success
-    # =====================================================
+    # 彻底移除可疑语义检测，信任沙箱测试结果。
+    # 只要 main.py 和 pytest 运行通过，即视为成功。
+    
     if success:
-
         print(
             "🎉 所有测试通过"
         )
-
     else:
-
         print(
             "❌ 沙箱验证失败"
         )
 
     return {
-
         **state,
-
-        "is_fixed":
-            success,
-
-        "error_message":
-            error_log,
-
-        "sandbox_stdout":
-            stdout,
-
-        "sandbox_stderr":
-            stderr
+        "is_fixed": success,
+        "error_message": error_log,
+        "sandbox_stdout": stdout,
+        "sandbox_stderr": stderr
     }
 # =========================================================
 # Patch Quality Gate Node

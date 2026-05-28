@@ -5,7 +5,7 @@ def run_pipeline():
     print("🚀 启动自动化数据处理流水线...")
     
     input_data = 100
-    current_weight = 11  # 调整为符合utils要求的最小有效值
+    current_weight = 11  # Adjusted to avoid division by zero
     
     print("[Main] 正在调用底层工具链...")
     result = utils.execute_computation(input_data, current_weight)

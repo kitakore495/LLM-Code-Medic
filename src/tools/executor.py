@@ -387,260 +387,167 @@ class CodeExecutor:
     # 主验证入口
     # =========================================================
     def run_v3_validation(
-        self,
-        repo_files: Dict[
-            str,
-            str
-        ]
-    ) -> Tuple[
-        bool,
-        str,
-        str,
-        str
-    ]:
+            self,
+            repo_files: Dict[str, str]
+        ) -> Tuple[bool, str, str, str]:
 
-        try:
-
-            print(
-                "   [Sandbox] "
-                "正在创建 Output 工作区..."
-            )
-
-            self._prepare_output_workspace()
-
-            self._write_output_files(
-                repo_files
-            )
-
-           # =================================================
-            # Step 1
-            # Run main.py
-            # =================================================
-            result = self._run_output_sandbox()
-
-            stdout = (
-                result.stdout
-                or ""
-            )
-
-            stderr = (
-                result.stderr
-                or ""
-            )
-
-            if (
-                result.returncode
-                != 0
-            ):
-
-                print(
-                    "\n❌ Output "
-                    "工作区测试失败"
-                )
-
-                error_log = (
-                    stderr
-                    if stderr
-                    else stdout
-                )
-
-                return (
-                    False,
-                    error_log,
-                    stdout,
-                    stderr
-                )
-
-            print(
-                "\n🎉 main.py "
-                "运行通过"
-            )
-
-            # =================================================
-            # Step 2
-            # Run Pytest
-            # =================================================
-            print(
-                "\n🧪 正在执行 pytest..."
-            )
-
-            pytest_result = subprocess.run(
-
-                [
-                    sys.executable,
-                    "-m",
-                    "pytest",
-                    "-q"
-                ],
-
-                cwd=self.output_root,
-
-                capture_output=True,
-
-                text=True,
-
-                timeout=20,
-
-                encoding="utf-8",
-
-                errors="replace"
-            )
-
-            pytest_stdout = (
-                pytest_result.stdout
-                or ""
-            )
-
-            pytest_stderr = (
-                pytest_result.stderr
-                or ""
-            )
-
-            stdout += (
-                "\n\n===== PYTEST =====\n"
-                + pytest_stdout
-            )
-
-            stderr += (
-                "\n\n===== PYTEST =====\n"
-                + pytest_stderr
-            )
-
-            # =================================================
-            # pytest returncode
-            #
-            # 0 -> pass
-            # 1 -> test fail
-            # 5 -> no tests collected
-            # =================================================
-            if pytest_result.returncode == 5:
-
-                print(
-                    "\n⚠️ 未发现 pytest 测试"
-                )
-
-                print(
-                    "⚠️ 跳过 pytest"
-                )
-
-            elif pytest_result.returncode != 0:
-
-                print(
-                    "\n❌ pytest 失败"
-                )
-
-                error_log = (
-                    pytest_stderr
-                    if pytest_stderr
-                    else pytest_stdout
-                )
-
-                return (
-                    False,
-                    error_log,
-                    stdout,
-                    stderr
-                )
-
-            else:
-
-                print(
-                    "🎉 pytest "
-                    "测试通过"
-                )
-
-            print(
-                "\n🎉 Output "
-                "工作区测试通过"
-            )
-
-            # =================================================
-            # Step 3
-            # Semantic Output Verify
-            #
-            # 注意：
-            # suspicious output 只 warning
-            # 不阻止修复成功
-            # =================================================
             try:
+                print(
+                    "  [Sandbox] "
+                    "正在创建 Output 工作区..."
+                )
 
-                suspicious_values = [
+                self._prepare_output_workspace()
 
-                    "159.0",
+                self._write_output_files(
+                    repo_files
+                )
 
-                    "999999",
+                # =================================================
+                # Step 1
+                # Run main.py
+                # =================================================
+                result = self._run_output_sandbox()
 
-                    "inf",
+                stdout = (
+                    result.stdout
+                    or ""
+                )
 
-                    "nan"
-                ]
+                stderr = (
+                    result.stderr
+                    or ""
+                )
 
-                suspicious_reason = None
-
-                for value in suspicious_values:
-
-                    if value in stdout:
-
-                        suspicious_reason = (
-                            f"stdout 出现可疑输出: "
-                            f"{value}"
-                        )
-
-                        break
-
-                if suspicious_reason:
-
+                if (
+                    result.returncode
+                    != 0
+                ):
                     print(
-                        "⚠️ [Verify] "
-                        "程序运行成功，但检测到可疑语义输出"
+                        "\n❌ Output "
+                        "工作区测试失败"
                     )
 
-                    print(
-                        f"原因: "
-                        f"{suspicious_reason}"
+                    error_log = (
+                        stderr
+                        if stderr
+                        else stdout
                     )
 
-                    print(
-                        "⚠️ 已记录 warning，"
-                        "不阻止修复完成"
+                    return (
+                        False,
+                        error_log,
+                        stdout,
+                        stderr
                     )
+
+                print(
+                    "\n🎉 main.py "
+                    "运行通过"
+                )
+
+                # =================================================
+                # Step 2
+                # Run Pytest
+                # =================================================
+                print(
+                    "\n🧪 正在执行 pytest..."
+                )
+
+                pytest_result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pytest",
+                        "-q"
+                    ],
+                    cwd=self.output_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                    encoding="utf-8",
+                    errors="replace"
+                )
+
+                pytest_stdout = (
+                    pytest_result.stdout
+                    or ""
+                )
+
+                pytest_stderr = (
+                    pytest_result.stderr
+                    or ""
+                )
+
+                stdout += (
+                    "\n\n===== PYTEST =====\n"
+                    + pytest_stdout
+                )
+
+                stderr += (
+                    "\n\n===== PYTEST =====\n"
+                    + pytest_stderr
+                )
+
+                if pytest_result.returncode == 5:
+                    print(
+                        "\n⚠️ 未发现 pytest 测试"
+                    )
+                    print(
+                        "⚠️ 跳过 pytest"
+                    )
+
+                elif pytest_result.returncode != 0:
+                    print(
+                        "\n❌ pytest 失败"
+                    )
+                    error_log = (
+                        pytest_stderr
+                        if pytest_stderr
+                        else pytest_stdout
+                    )
+                    return (
+                        False,
+                        error_log,
+                        stdout,
+                        stderr
+                    )
+                else:
+                    print(
+                        "🎉 pytest "
+                        "测试通过"
+                    )
+
+                print(
+                    "\n🎉 Output "
+                    "工作区测试通过"
+                )
+
+                return (
+                    True,
+                    "",
+                    stdout,
+                    stderr
+                )
+
+            except subprocess.TimeoutExpired:
+                print(
+                    "\n🚨 沙箱运行超时"
+                )
+                return (
+                    False,
+                    "Execution timed out",
+                    "",
+                    ""
+                )
 
             except Exception:
-
                 print(
-                    "⚠️ [Verify] "
-                    "语义检测异常，已忽略"
+                    "\n🚨 执行器内部异常"
                 )
-
-            return (
-                True,
-                "",
-                stdout,
-                stderr
-            )
-
-        except subprocess.TimeoutExpired:
-
-            print(
-                "\n🚨 沙箱运行超时"
-            )
-
-            return (
-                False,
-                "Execution timed out",
-                "",
-                ""
-            )
-
-        except Exception:
-
-            print(
-                "\n🚨 执行器内部异常"
-            )
-
-            return (
-                False,
-                traceback.format_exc(),
-                "",
-                ""
-            )
+                return (
+                    False,
+                    traceback.format_exc(),
+                    "",
+                    ""
+                )
