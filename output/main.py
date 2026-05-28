@@ -1,11 +1,14 @@
 # tests/v3/main.py
 import utils
 
+# Business constants with explanatory comments
+_MIN_VALID_WEIGHT = 11  # Minimum weight that satisfies utils._MIN_WEIGHT_EXCLUSIVE + 1
+
 def run_pipeline():
     print("🚀 启动自动化数据处理流水线...")
     
     input_data = 100
-    current_weight = 11  # Adjusted to avoid division by zero
+    current_weight = _MIN_VALID_WEIGHT  # Using named constant
     
     print("[Main] 正在调用底层工具链...")
     result = utils.execute_computation(input_data, current_weight)
