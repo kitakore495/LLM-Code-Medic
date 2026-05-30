@@ -1,6 +1,5 @@
 import ast
 import re
-
 from typing import Dict, List, Tuple
 
 
@@ -14,7 +13,7 @@ class SemanticPatchGate:
       RULE-4  已有函数内公式常量被移除或替换
       RULE-5  已有函数签名参数数量变化
       RULE-6  Caller 盲区（callee 契约已存在但 caller 未被修复）
-      RULE-7  target_files 必须有实际修改
+      RULE-7  target_files 必须有实际修改（智能协同版）
     """
 
     # =========================================================
@@ -113,20 +112,6 @@ class SemanticPatchGate:
     # =========================================================
     # RULE-4
     # 检测已有函数内的公式数值是否被篡改。
-    #
-    # 关键设计：区分"值被修改"和"值被具名化（提取为常量）"
-    #
-    # 合规重构（允许）：
-    #   旧: adjusted_weight = weight - 10
-    #   新: _WEIGHT_ADJUSTMENT = 10
-    #       adjusted_weight = weight - _WEIGHT_ADJUSTMENT
-    #   → BinOp 里的 Constant(10) 变成了 Name('_WEIGHT_ADJUSTMENT')
-    #   → 通过模块级常量表解析后，数值集合不变，不触发
-    #
-    # 违规篡改（拒绝）：
-    #   旧: adjusted_weight = weight - 10
-    #   新: adjusted_weight = weight - 9   ← 数值被改变
-    #   → 解析后数值集合 {9} vs {10}，removed={10}，触发
     # =========================================================
     @staticmethod
     def _check_formula_mutations(
@@ -137,8 +122,6 @@ class SemanticPatchGate:
     ) -> List[str]:
         hits = []
 
-        # 提取模块级具名常量表：_NAME = value 或 NAME = value
-        # 用于把 BinOp 里的 Name 引用解析回实际数值
         module_consts: Dict[str, float] = {}
         for node in ast.walk(new_tree):
             if isinstance(node, ast.Assign):
@@ -152,11 +135,6 @@ class SemanticPatchGate:
                         module_consts[target.id] = node.value.value
 
         def binop_resolved_values(func_node: ast.FunctionDef) -> set:
-            """
-            收集函数内 BinOp 的数值集合。
-            Constant 节点直接取值；Name 节点查模块常量表解析。
-            未能解析的 Name（运行时变量）忽略，不参与对比。
-            """
             result = set()
             for node in ast.walk(func_node):
                 if isinstance(node, ast.BinOp):
@@ -168,7 +146,6 @@ class SemanticPatchGate:
             return result
 
         def binop_raw_constants(func_node: ast.FunctionDef) -> set:
-            """旧函数：只取 Constant，旧代码不会有具名常量引用"""
             result = set()
             for node in ast.walk(func_node):
                 if isinstance(node, ast.BinOp):
@@ -214,23 +191,7 @@ class SemanticPatchGate:
         return hits
 
     # =========================================================
-    # RULE-6: Caller 盲区检测（重写版）
-    #
-    # 设计约束（避免误杀）：
-    #   - callee 必须是"仅被调用、自身不调用其他 target_files 函数"的文件
-    #     即：在 target_files 内，通过拓扑关系识别真正的 callee
-    #   - caller 的判断来源是 repo_files 中非 target_files 的文件
-    #     或 target_files 中但本轮未被实际修改的文件
-    #   - 如果 caller 已在 target_files 且已被修改：不触发 RULE-6
-    #
-    # 触发条件（全部满足）：
-    #   a) sandbox_stderr 包含明确的异常类名（ValueError、Error 等）
-    #   b) 存在"纯 callee 文件"：该文件在修复后包含 raise，
-    #      且该文件在原始版本中不包含 raise（即 raise 是本轮新增的）
-    #   c) 存在调用了该 callee 函数的文件，且该文件
-    #      在 repo_files 中与 original_repo_files 完全相同（未被修改）
-    #
-    # 条件 c 是关键修正：只要 caller 已经被修改，就不触发 RULE-6。
+    # RULE-6: Caller 盲区检测
     # =========================================================
     @staticmethod
     def _check_caller_blindspot(
@@ -240,32 +201,26 @@ class SemanticPatchGate:
         sandbox_stderr: str,
     ) -> List[str]:
         hits = []
-
         if not sandbox_stderr:
             return hits
 
-        # 条件 a: stderr 包含异常类名
         if not re.search(r"\b\w*Error\b|\braise\b", sandbox_stderr):
             return hits
 
-        # ── 识别"纯 callee 文件" ──────────────────────────────
-        # 定义：在 target_files 中，修复后新增了 raise，
-        # 且原始版本没有 raise（说明本轮是"给 callee 加契约"）
         pure_callee_files: List[str] = []
         for tf in target_files:
             original_code = original_repo_files.get(tf, "")
             repaired_code = repo_files.get(tf, "")
             if repaired_code == original_code:
-                continue  # 未被修改，不是本轮的 callee
+                continue
             original_had_raise = bool(re.search(r"\braise\b", original_code))
             repaired_has_raise = bool(re.search(r"\braise\b", repaired_code))
             if repaired_has_raise and not original_had_raise:
                 pure_callee_files.append(tf)
 
         if not pure_callee_files:
-            return hits  # 没有"本轮新增 raise 的 callee"，不触发
+            return hits
 
-        # ── 提取 pure_callee_files 中定义的函数名 ──────────────
         callee_func_names: set = set()
         for tf in pure_callee_files:
             code = repo_files.get(tf, "")
@@ -280,19 +235,15 @@ class SemanticPatchGate:
         if not callee_func_names:
             return hits
 
-        # ── 找出调用了 callee 函数但本轮未被修改的文件 ────────
-        # "未被修改" = repo_files[path] == original_repo_files[path]
         unmodified_callers: List[str] = []
         for repo_path, repaired_code in repo_files.items():
             if repo_path in pure_callee_files:
-                continue  # 跳过 callee 自身
+                continue
 
-            # 关键判断：该文件本轮是否已被修改？
             original_code = original_repo_files.get(repo_path, "")
             if repaired_code != original_code:
-                continue  # 已被修改，说明已纳入修复范围，不触发
+                continue
 
-            # 检查该文件是否调用了 callee 函数
             try:
                 tree = ast.parse(repaired_code)
             except SyntaxError:
@@ -395,15 +346,28 @@ class SemanticPatchGate:
             )
             reasons.extend(rule6_hits)
 
-        # ── RULE-7: target_files 必须有实际修改 ────────────────
-        changed = {
-            p.lower()
-            for p in files_to_check
-            if original_repo_files.get(p) != repo_files.get(p)
-        }
-        for file_name in target_files:
-            if file_name.lower() not in changed:
-                reasons.append(f"{file_name} RULE-7: 被要求修复但未修改")
+        # ── 💡 升级版 RULE-7: target_files 协同改动判定 ────────────────
+        if "NO_FAULT_DETECTED" in analysis or "NO_REPAIR_NEEDED" in analysis:
+            print("ℹ️ [SemanticGate] 检测到诊断为无需修复，跳过 RULE-7 强改约束")
+        else:
+            # 统计当前整批待检查文件中，有哪些文件被真正修改了
+            changed_files = {
+                p.lower()
+                for p in files_to_check
+                if original_repo_files.get(p) != repo_files.get(p)
+            }
+            
+            # 如果整批 target_files 里至少有一个文件被成功改动了（协同修复开始奏效）
+            # 那么未发生改动的文件将被智能放行，不再做机械的死锁拦截
+            if len(changed_files) > 0:
+                unchanged_targets = [f for f in target_files if f.lower() not in changed_files]
+                if unchanged_targets:
+                    print(f"ℹ️ [SemanticGate] 协同修复检测：已修改文件 {list(changed_files)}，智能放行未修改的目标文件: {unchanged_targets}")
+            else:
+                # 只有在诊断要求修复，且大模型完全一个文件都没改动的情况下，才报 RULE-7
+                for file_name in target_files:
+                    if file_name.lower() not in changed_files:
+                        reasons.append(f"{file_name} RULE-7: 被要求修复但未修改")
 
         # ── Result ──────────────────────────────────────────────
         if reasons:

@@ -2,9 +2,7 @@ from typing import TypedDict
 from typing import Dict
 from typing import List
 
-
 class AgentState(TypedDict):
-
     repo_root: str
     project_map: str
     error_message: str
@@ -13,6 +11,9 @@ class AgentState(TypedDict):
 
     repo_files: Dict[str, str]
     original_repo_files: Dict[str, str]
+    
+    # 👇 新增这行，防止文件字典丢失
+    repaired_repo_files: Dict[str, str]
 
     repair_attempts: int
     is_fixed: bool
@@ -22,6 +23,9 @@ class AgentState(TypedDict):
     # Sandbox
     sandbox_stdout: str
     sandbox_stderr: str
+    
+    # 👇 新增这行，这是沙箱是否通过的真正通行证！
+    verify_passed: bool
 
     # Gates
     patch_quality_passed: bool
@@ -33,7 +37,7 @@ class AgentState(TypedDict):
     policy_gate_passed: bool
     policy_gate_reason: str
 
-    # ==================== 新增：Repairability Gate ====================
+    # Repairability Gate
     repairable: bool
     repairability_reason: str
     repair_options: List[str]

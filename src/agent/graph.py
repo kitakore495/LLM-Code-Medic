@@ -1,7 +1,10 @@
 import os
 import re
+import shutil
+import json
 
 from dotenv import load_dotenv
+from typing import TypedDict, List, Dict
 
 # =========================================================
 # 强制加载 .env
@@ -17,10 +20,6 @@ ROOT_DIR = os.path.dirname(
 ENV_PATH = os.path.join(ROOT_DIR, ".env")
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
-from typing import TypedDict
-from typing import List
-from typing import Dict
-
 from src.agent.state import AgentState
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -32,11 +31,7 @@ from src.llm.llm_invoker import LLMInvoker
 from src.quality.patch_quality_gate import PatchQualityGate
 from src.quality.semantic_patch_gate import SemanticPatchGate
 from src.quality.policy_gate import run_policy_gate
-from langgraph.graph import (
-    StateGraph,
-    START,
-    END
-)
+
 
 # =========================================================
 # PATCH PARSER
@@ -79,7 +74,7 @@ def create_repair_llm():
     return provider, model_name
 
 # =========================================================
-# Diagnose Node
+# Diagnose Node / Gate Constraints
 # =========================================================
 def build_gate_constraints(
     semantic_reason: str,
@@ -108,8 +103,14 @@ def build_gate_constraints(
             "- FORBIDDEN: do NOT add delegation-only helper functions",
         ]
  
+    # 🔥 强化 RULE-5 签名约束
     if "签名" in semantic_reason or "rule-5" in reason_lower:
-        rules.append("- FORBIDDEN: do NOT modify existing public function signatures")
+        rules += [
+            "⚠️ RULE-5 VIOLATION DETECTED:",
+            "- FORBIDDEN: do NOT modify existing public function signatures.",
+            "- ACTION REQUIRED: You MUST revert the function signature to its original state (e.g., remove the parameters you just added).",
+            "- SOLUTION: Find another way to pass data, such as importing constants from config.py directly."
+        ]
  
     if "公式常量" in semantic_reason or "rule-4" in reason_lower:
         rules.append(
@@ -136,7 +137,6 @@ def build_gate_constraints(
         ]
  
     # ── Sandbox 循环检测（verify 反复失败，callee 已有 raise）───
-    # 当 repair_attempts >= 2 且 stderr 里反复出现同类异常时触发
     if (
         repair_attempts >= 2
         and ("valueerror" in stderr_lower or "error" in stderr_lower)
@@ -152,10 +152,9 @@ def build_gate_constraints(
         ]
  
     return "\n".join(rules) if rules else "N/A"
- 
- 
+
 # =========================================================
-# diagnose_node
+# Diagnose Node
 # =========================================================
 def diagnose_node(state: AgentState):
     print(f"\n🚀 [Diagnose] 第 {state.get('repair_attempts', 0) + 1} 轮诊断...")
@@ -269,7 +268,6 @@ Caller correction 只有在以下条件满足时允许：
     )
     if files_match:
         try:
-            import json
             parsed = json.loads(files_match.group(1).replace("'", '"'))
             if isinstance(parsed, list):
                 target_files = [p.strip() for p in parsed if isinstance(p, str)]
@@ -290,10 +288,9 @@ Caller correction 只有在以下条件满足时允许：
         "analysis": analysis,
         "target_files": target_files,
     }
- 
- 
+
 # =========================================================
-# repair_node
+# Repair Node
 # =========================================================
 def repair_node(state: AgentState):
     print("🛠️ [Repair] 正在生成多文件补丁...")
@@ -311,6 +308,13 @@ def repair_node(state: AgentState):
 
     repair_history_text = "\n\n".join(
         state.get("repair_history", [])
+    )
+
+    # 🔥 调用 build_gate_constraints，获取门禁报错对应的强制约束
+    gate_constraints = build_gate_constraints(
+        state.get("semantic_gate_reason", ""),
+        state.get("sandbox_stderr", ""),
+        state.get("repair_attempts", 0)
     )
 
     user_prompt = f"""
@@ -339,6 +343,9 @@ def repair_node(state: AgentState):
 4. 禁止修改公式和阈值。
 5. 无合法方案时必须输出：
 ESCALATE_REQUIRED: reason
+
+【🛡️ 动态门禁强制约束 (MANDATORY)】
+{gate_constraints}
 """.strip()
 
     response = LLMInvoker.invoke(
@@ -377,12 +384,14 @@ ESCALATE_REQUIRED: reason
     return {
         **state,
         "repo_files": merged_repo_files,
+        "repaired_repo_files": merged_repo_files,
         "repair_history": history,
-
-        # 唯一增加次数的位置
-        "repair_attempts":
-            state.get("repair_attempts", 0) + 1
+        "repair_attempts": state.get("repair_attempts", 0) + 1
     }
+
+# =========================================================
+# Repairability Gate Node
+# =========================================================
 def repairability_gate_node(state: AgentState):
     print("\n🔍 [Repairability Gate] 检查当前问题是否可自动修复...")
 
@@ -414,22 +423,12 @@ def repairability_gate_node(state: AgentState):
 
         return {
             **state,
-
-            # 停止状态
             "repairable": False,
-            "repair_status":
-                "UNREPAIRABLE_UNDER_CONSTRAINTS",
-
-            # 给 UI / 用户看的
+            "repair_status": "UNREPAIRABLE_UNDER_CONSTRAINTS",
             "repairability_reason": reason,
             "repair_options": options,
-            "needs_user_decision":
-                needs_decision,
-
-            # 保持失败态
+            "needs_user_decision": needs_decision,
             "is_fixed": False,
-
-            # 历史
             "repair_history": history,
         }
 
@@ -445,12 +444,11 @@ def repairability_gate_node(state: AgentState):
         "repair_status": "REPAIRABLE",
         "repairability_reason": reason,
         "repair_options": options,
-        "needs_user_decision":
-            needs_decision,
+        "needs_user_decision": needs_decision,
     }
+
 # =========================================================
-# semantic_patch_gate_node
-# 唯一变化：透传 sandbox_stderr 给 SemanticPatchGate.check()
+# Semantic Patch Gate Node
 # =========================================================
 def semantic_patch_gate_node(state: AgentState):
     print("\n🧠 [Semantic Patch Gate] 正在检查语义补丁质量...")
@@ -480,7 +478,6 @@ def semantic_patch_gate_node(state: AgentState):
 
     if passed:
         print("✅ [Semantic Patch Gate] 检查通过")
-
     else:
         print("❌ [Semantic Patch Gate] 检查失败")
         print(f"原因: {reason}")
@@ -492,36 +489,62 @@ def semantic_patch_gate_node(state: AgentState):
             f"{state.get('repair_attempts', 0)}"
         )
 
-    # 注意：
-    # Semantic Gate 不再修改 repair_attempts
-    # repair_attempts ONLY 在 repair_node 中 +1
-
     return {
         **state,
         "semantic_gate_passed": passed,
         "semantic_gate_reason": reason,
         "repair_history": history,
     }
+
 # =========================================================
 # Verify Node
 # =========================================================
 def verify_node(state: AgentState):
-    print("🧪 [Verify] 正在进行沙箱验证...")
+    print("\n🧪 [Verify] 正在进行沙箱验证...")
+
+    current_repo_files = state.get("repo_files", {})
     executor = CodeExecutor(repo_root=state["repo_root"])
-    success, error_log, stdout, stderr = executor.run_v3_validation(state["repo_files"])
 
+    # 1. 安全运行（内部会自动创建工作区并写入 current_repo_files）
+    success = False
+    error_log = ""
+    
+    try:
+        # 🚀 统一交给执行器，防止重复写文件与打印
+        res = executor.run_v3_validation(current_repo_files) 
+        
+        if isinstance(res, tuple):
+            success = res[0]
+            if len(res) > 1:
+                error_log = res[1]
+        elif hasattr(res, "returncode"):
+            success = (res.returncode == 0)
+            error_log = f"STDOUT: {getattr(res, 'stdout', '')}\nSTDERR: {getattr(res, 'stderr', '')}" if not success else ""
+        else:
+            success = bool(res)
+            error_log = ""
+            
+    except Exception as e:
+        import traceback
+        success = False
+        error_log = f"Critical sandbox wrapper crash: {str(e)}\n{traceback.format_exc()}"
+
+    # 2. 结果判断与打印
     if success:
-        print("🎉 所有测试通过")
+        print("\n🎉 [Graph] 沙箱验证完全通过！")
     else:
-        print("❌ 沙箱验证失败")
+        print("\n❌ [Graph] 沙箱验证遭遇失败！")
 
+    # 🔥 保持 **state 解构与正确的状态更新
     return {
         **state,
         "is_fixed": success,
-        "error_message": error_log,
-        "sandbox_stdout": stdout,
-        "sandbox_stderr": stderr
+        "verify_passed": success,
+        "sandbox_stderr": "" if success else (error_log if error_log else "Unknown sandbox error"),
+        "semantic_gate_reason": "ok" if success else state.get("semantic_gate_reason", ""),
+        "policy_gate_reason": "" if success else state.get("policy_gate_reason", "")
     }
+
 # =========================================================
 # Patch Quality Gate Node
 # =========================================================
@@ -554,20 +577,14 @@ def patch_quality_gate_node(state: AgentState):
         print(
             f"❌ [Patch Quality Gate] 检查失败: {reason}"
         )
-
         history.append(
             "[Patch Gate Failure]\n"
             f"reason={reason}\n"
             f"repair_attempts="
             f"{state.get('repair_attempts', 0)}"
         )
-
     else:
         print("✅ [Patch Quality Gate] 检查通过")
-
-    # 注意：
-    # 不再增加 repair_attempts
-    # repair_attempts ONLY 在 repair_node 中 +1
 
     return {
         **state,
@@ -575,23 +592,17 @@ def patch_quality_gate_node(state: AgentState):
         "patch_quality_reason": reason,
         "repair_history": history
     }
+
 # =========================================================
-# Continue Router
+# Continue Routers
 # =========================================================
 def should_continue(state):
-
     if state.get("is_fixed"):
         return END
 
-    repair_attempts = state.get(
-        "repair_attempts",
-        0
-    )
-
+    repair_attempts = state.get("repair_attempts", 0)
     if repair_attempts >= 5:
-        print(
-            "\n🚨 达到最大修复轮次"
-        )
+        print("\n🚨 达到最大修复轮次")
         return END
 
     return "diagnose"
@@ -628,7 +639,6 @@ def policy_gate_node(state: AgentState):
 
     if not ok:
         print(f"❌ [PolicyGate] 检查失败: {reason}")
-
         return {
             **state,
             "policy_gate_passed": False,
@@ -644,165 +654,81 @@ def policy_gate_node(state: AgentState):
         "policy_gate_reason": ""
     }
 
-
-# ------------------------------------------------
-# Repairability Router
-# ------------------------------------------------
 def should_continue_after_repairability(state):
+    # 1. 强制熔断：超过 5 次直接停止，绝不恋战
+    repair_attempts = state.get("repair_attempts", 0)
+    if repair_attempts >= 5:
+        print("\n💀 [Routing] 达到最大修复轮次 (5次)，强制终止死循环！")
+        return "stop"
 
-    repairable = state.get(
-        "repairable",
-        True
-    )
-
-    print(
-        f"\n[DEBUG] repairable = {repairable}"
-    )
+    # 2. 原有逻辑
+    repairable = state.get("repairable", True)
+    print(f"\n[DEBUG] repairable = {repairable}")
 
     if repairable:
-        print(
-            "🔁 [RepairabilityGate] 允许继续修复"
-        )
+        print("🔁 [RepairabilityGate] 允许继续修复")
         return "diagnose"
 
-    print(
-        "🛑 [RepairabilityGate] 已终止自动修复流程"
-    )
-
+    print("🛑 [RepairabilityGate] 已终止自动修复流程")
     return "stop"
 
+# =========================================================================
+# 🌟 修复升级：使用正确的 is_fixed 字段进行判断
+# =========================================================================
+def should_continue_after_verify(state: AgentState) -> str:
+    # 只要 is_fixed 或者 verify_passed 有一个是 True，就判定为成功
+    if state.get("verify_passed", False) or state.get("is_fixed", False):
+        print("\n🏁 [Graph-Routing] 沙箱测试完全通过！正在退出状态机并完成修复。...")
+        return "end"
 
+    print("\n🔁 [Graph-Routing] 沙箱仍存在报错，正在送入 RepairabilityGate 分析...")
+    return "repairability_gate"
+# =========================================================================
+# 🛠️ 主体架构编译：create_v4_medic_graph
+# =========================================================================
 def create_v4_medic_graph():
+    workflow = StateGraph(AgentState)
 
-    workflow = StateGraph(
-        AgentState
-    )
+    workflow.add_node("diagnose", diagnose_node)
+    workflow.add_node("repair", repair_node)
+    workflow.add_node("patch_quality_gate", patch_quality_gate_node)
+    workflow.add_node("semantic_patch_gate", semantic_patch_gate_node)
+    workflow.add_node("policy_gate", policy_gate_node)
+    workflow.add_node("repairability_gate", repairability_gate_node)
+    workflow.add_node("verify", verify_node)
 
-    # ---------------------------------
-    # Nodes
-    # ---------------------------------
-    workflow.add_node(
-        "diagnose",
-        diagnose_node
-    )
+    workflow.add_edge(START, "diagnose")
+    workflow.add_edge("diagnose", "repair")
+    workflow.add_edge("repair", "patch_quality_gate")
 
-    workflow.add_node(
-        "repair",
-        repair_node
-    )
-
-    workflow.add_node(
-        "patch_quality_gate",
-        patch_quality_gate_node
-    )
-
-    workflow.add_node(
-        "semantic_patch_gate",
-        semantic_patch_gate_node
-    )
-
-    workflow.add_node(
-        "policy_gate",
-        policy_gate_node
-    )
-
-    workflow.add_node(
-        "repairability_gate",
-        repairability_gate_node
-    )
-
-    workflow.add_node(
-        "verify",
-        verify_node
-    )
-
-    # ---------------------------------
-    # Base Flow
-    # ---------------------------------
-    workflow.add_edge(
-        START,
-        "diagnose"
-    )
-
-    workflow.add_edge(
-        "diagnose",
-        "repair"
-    )
-
-    workflow.add_edge(
-        "repair",
-        "patch_quality_gate"
-    )
-
-    # ---------------------------------
-    # Patch Gate
-    # ---------------------------------
     workflow.add_conditional_edges(
         "patch_quality_gate",
         should_continue_after_patch_gate,
-        {
-            "repair": "repair",
-            "semantic_patch_gate":
-                "semantic_patch_gate",
-            END: END,
-        }
+        {"repair": "repair", "semantic_patch_gate": "semantic_patch_gate", END: END}
     )
 
-    # ---------------------------------
-    # Semantic Gate
-    # ---------------------------------
     workflow.add_conditional_edges(
         "semantic_patch_gate",
         should_continue_after_semantic_gate,
-        {
-            "repair": "repair",
-            "verify": "policy_gate",
-            END: END,
-        }
+        {"repair": "repair", "verify": "policy_gate", END: END}
     )
 
-    # ---------------------------------
-    # Policy Gate
-    # ---------------------------------
     workflow.add_conditional_edges(
         "policy_gate",
-        lambda s:
-            "verify"
-            if s.get(
-                "policy_gate_passed",
-                False
-            )
-            else "repairability_gate",
-        {
-            "verify": "verify",
-            "repairability_gate":
-                "repairability_gate",
-        }
+        lambda s: "verify" if s.get("policy_gate_passed", False) else "repairability_gate",
+        {"verify": "verify", "repairability_gate": "repairability_gate"}
     )
 
-    # ---------------------------------
-    # Verify -> Repairability Gate
-    # ---------------------------------
-    workflow.add_edge(
+    workflow.add_conditional_edges(
         "verify",
-        "repairability_gate"
+        should_continue_after_verify,
+        {"end": END, "repairability_gate": "repairability_gate"}
     )
 
-    # ---------------------------------
-    # Repairability Gate
-    # repairable=True  -> diagnose
-    # repairable=False -> END
-    # ---------------------------------
     workflow.add_conditional_edges(
         "repairability_gate",
         should_continue_after_repairability,
-        {
-            "diagnose":
-                "diagnose",
-
-            "stop":
-                END,
-        }
+        {"diagnose": "diagnose", "stop": END}
     )
 
     return workflow.compile()
