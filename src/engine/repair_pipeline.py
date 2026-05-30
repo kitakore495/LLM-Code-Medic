@@ -188,9 +188,6 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
             "original_repo_files":
                 initial_repo_files.copy(),
 
-            "attempts":
-                0,
-
             "repair_attempts":
                 0,
 
