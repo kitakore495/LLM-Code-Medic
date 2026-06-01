@@ -1,3 +1,4 @@
+
 def calculate_score(values):
     avg = sum(values) / len(values)
 

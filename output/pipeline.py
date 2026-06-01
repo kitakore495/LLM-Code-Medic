@@ -8,6 +8,6 @@ def run_pipeline():
 
     processed = process_dataset(raw_data)
 
-    save_report(processed, REPORT_PATH)
+    save_report(processed, path=REPORT_PATH)
 
     return processed
