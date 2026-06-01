@@ -174,39 +174,88 @@ Explicitly rule out these patterns before recommending any fix:
 
 Caller-side repair (changing a caller's argument value) is ONLY allowed when:
 
-  1. ROOT_CAUSE_CLASS == [CALLER_VIOLATED]
-  AND
-  2. The corrected value is derivable from ONE of:
-     - existing project constants or configuration
-     - naming semantics of variables/functions in the same file
-     - documented contracts (docstrings, comments, type annotations)
-     - established runtime invariants visible in the codebase
+ROOT_CAUSE_CLASS == [CALLER_VIOLATED]
 
-FORBIDDEN: inventing a value.
+AND The corrected value is derivable ONLY from repository-visible evidence.
 
-Includes:
+ALLOWED EVIDENCE SOURCES:
 
-- numeric literals
-- path literals
-- string literals
-- timeout/retry constants
-- fabricated configuration
+repository-defined constants or configuration
 
-BAD:
-save_report(report, path="reports/output.json")
+explicit documented contracts (docstrings, comments, annotations)
 
-GOOD:
-save_report(report, path=REPORT_PATH)
+previously established semantic constants
 
-Caller-side repair values MUST be derivable from:
+already used elsewhere in repository
 
-- project constants/configuration
-- callee signature semantics
-- repo-visible invariants
-- existing variable naming
+explicit call-site conventions already present in repository
 
-If no justified correction exists:
-state ESCALATE_REQUIRED.
+STRICT VALUE DERIVATION RULE:
+A caller-side value correction is valid ONLY if a concrete repository-backed justification exists. Before recommending a caller-side value change, you MUST explicitly determine:
+VALUE_SOURCE: <symbol/evidence>
+The value MUST be reproducible from repository context.
+
+FORBIDDEN VALUE INVENTION:
+Inventing a caller value is prohibited. Includes:
+
+numeric literals
+
+path literals
+
+string literals
+
+timeout/retry constants
+
+fabricated configuration
+
+inferred thresholds
+
+synthesized defaults
+
+business heuristics inferred from nearby code
+
+arithmetic formulas inferred from local variables
+
+extrapolation from a failing example
+
+FORBIDDEN INFERENCE PATTERNS:
+You MUST NOT:
+
+infer business meaning from variable names
+
+infer intent from nearby numbers
+
+invent minimum or maximum thresholds
+
+synthesize a "reasonable" value
+
+derive formulas from neighboring variables
+
+extrapolate from a single failure
+
+introduce literals merely because they satisfy a guard condition
+
+EXAMPLE OF INVALID REASONING:
+observed failure
+-> invent a new caller argument value
+-> assume it is semantically correct
+
+EXAMPLE OF VALID REASONING:
+repository exposes a named constant, documented contract, or previously established convention
+-> reuse that repository-backed source
+
+LITERAL VALUE RULE:
+If repository context already exposes a named symbol representing a value:
+-> reuse the symbol
+You are FORBIDDEN from replacing it with a literal.
+
+NO-HALLUCINATION RULE:
+Passing verification by inventing a caller value is considered a repair failure. Repairs must preserve repository semantics, not merely satisfy runtime execution.
+If VALUE_SOURCE cannot be proven:
+-> output ESCALATE_REQUIRED
+Do NOT guess.
+Do NOT synthesize business logic.
+Do NOT invent semantics.
 
 === OUTPUT FORMAT (严格遵守，禁止 markdown 或代码块) ===
 

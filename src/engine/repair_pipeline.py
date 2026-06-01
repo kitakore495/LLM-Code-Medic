@@ -243,30 +243,36 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
         # =====================================================
         # Plugin Pipeline
         # =====================================================
-        print(
-            "\n[Step 5] 🧩 "
-            "执行 Plugin System..."
-        )
+        if final_state.get("is_fixed"):
+            print(
+                "\n[Step 5] 🧩 "
+                "执行 Plugin System..."
+            )
 
-        updated_repo_files = (
-            self.plugin_manager
-            .run_all(
-                repo_files=(
-                    final_state[
-                        "repo_files"
-                    ]
-                ),
-                analysis=(
-                    final_state[
-                        "analysis"
-                    ]
+            updated_repo_files = (
+                self.plugin_manager
+                .run_all(
+                    repo_files=(
+                        final_state[
+                            "repo_files"
+                        ]
+                    ),
+                    analysis=(
+                        final_state[
+                            "analysis"
+                        ]
+                    )
                 )
             )
-        )
 
-        final_state[
-            "repo_files"
-        ] = updated_repo_files
+            final_state[
+                "repo_files"
+            ] = updated_repo_files
+        else:
+            print(
+                "\n⏭️ [Plugin] "
+                "跳过插件流水线（修复未成功）"
+            )
 
         print(
             "\n"
