@@ -158,6 +158,7 @@ def build_gate_constraints(
 # Diagnose Node
 # =========================================================
 def diagnose_node(state: AgentState):
+
     print(
         f"\n🚀 [Diagnose] 第 "
         f"{state.get('repair_attempts', 0) + 1}"
@@ -220,11 +221,14 @@ LOOP_CHECK_2:
 上一轮是否只修改了 callee 文件？
 LOOP_CHECK_3:
 callee 是否已包含 raise？
+
 如果三项均为 YES：
 ROOT_CAUSE_CLASS 必须重新判定为
 [CALLER_VIOLATED]
+
 且 TARGET_FILES 必须包含
 caller 文件。
+
 禁止继续只修改 callee。
 """.strip()
 
@@ -272,56 +276,7 @@ caller 文件。
 {sandbox_stderr}
 {loop_hint}
 
-========================
-【沙箱执行约定 — Import 路径规则】
-========================
-所有源码文件在沙箱执行时写入同一执行目录（扁平布局，flat layout）。
-Import 推断必须基于"执行目录中的模块可见性"，不得使用仓库的物理目录层级。
-
-规则：
-  1. import 只能使用模块名本身（= 文件名去掉 .py），不允许含目录层级。
-     正确：from validator import validate_dataset
-     错误：from some.nested.path.validator import validate_dataset
-  2. 禁止将仓库扫描结果中的路径前缀直接用于 import 推断。
-  3. 唯一例外：仓库中存在显式 __init__.py 且运行方式明确支持包解析。
-
-========================
-【BUG_INVENTORY 强制扫描约束】
-========================
-在输出 TARGET_FILES 之前，必须对所有涉及文件执行完整扫描。
-对每条 import 语句：
-  CHECK-1: 被 import 的模块名是否存在于 repo_files？（依据沙箱扁平布局）
-  CHECK-2: 被 import 的 symbol（函数/类）是否在该模块中实际定义？
-           必须查阅上方【项目源码】中对应模块的源码确认。
-
-对每个函数调用：
-  CHECK-3: 调用的函数名是否与 callee 模块中的定义完全匹配？
-  CHECK-4: 传入的参数（位置参数数量、关键字参数名称）是否与函数签名完全匹配？
-           必须查阅 callee 源码中的函数定义确认签名，不得猜测参数名。
-
-将所有不合法条目列入 BUG_INVENTORY 输出段落。
-repair 必须一次性修复 BUG_INVENTORY 中的全部条目，禁止遗留已知 bug。
-
-========================
-【诊断约束】
-========================
-程序运行成功 ≠ 修复成功。
-
-FORBIDDEN:
-1. 修改调用参数仅为了让程序运行成功
-2. 用任意常量替换运行时输入
-3. 发明仓库中不存在的业务阈值
-4. 为绕过异常而改变参数
-5. 根据单个测试表现猜测业务规则
-6. 猜测函数参数名——必须从源码中读取签名
-
-Caller correction 只有在以下条件满足时允许：
-  1. ROOT_CAUSE_CLASS == [CALLER_VIOLATED]
-  AND
-  2. 修正值可从：项目常量、配置、命名语义、文档契约、已有不变量中推导。
-  如果无法推导：输出 ESCALATE_REQUIRED，不要臆造业务值。
-
-严格按照 DIAGNOSE_SYSTEM_PROMPT 格式输出，必须包含 LOOP_CHECK 和 BUG_INVENTORY 段落。
+严格按照 DIAGNOSE_SYSTEM_PROMPT 输出。
 """.strip()
 
     # ==========================================================
@@ -344,6 +299,35 @@ Caller correction 只有在以下条件满足时允许：
     analysis = response.content
 
     # ==========================================================
+    # HARD ESCALATION DETECTED
+    # 第一轮直接终止自动修复
+    # ==========================================================
+    analysis_upper = analysis.upper()
+
+    hard_escalate = any([
+        "ESCALATE_REQUIRED" in analysis_upper,
+        "NO_VALID_CALLER_VALUE" in analysis_upper,
+        "CALLER_VALUE_NOT_DERIVABLE" in analysis_upper,
+        "AUTO_REPAIR_NOT_POSSIBLE" in analysis_upper,
+    ])
+
+    if hard_escalate:
+
+        print(
+            "🛑 [Diagnose] "
+            "Diagnose 已判定不可自动修复"
+        )
+
+        return {
+            **state,
+            "analysis": analysis,
+            "target_files": [],
+            "repairable": False,
+            "repairability_reason":
+                "Diagnose 判定缺少可推导业务值，需人工决策"
+        }
+
+    # ==========================================================
     # Parse TARGET_FILES
     # ==========================================================
     target_files = []
@@ -363,28 +347,20 @@ Caller correction 只有在以下条件满足时允许：
                 .replace("'", '"')
             )
 
-            if isinstance(
-                parsed,
-                list
-            ):
+            if isinstance(parsed, list):
                 target_files = [
                     p.strip()
                     for p in parsed
-                    if isinstance(
-                        p,
-                        str
-                    )
+                    if isinstance(p, str)
                 ]
 
         except Exception:
             pass
 
-    # ==========================================================
-    # normalize paths
-    # ==========================================================
     cleaned = []
 
     for p in target_files:
+
         p = (
             p.replace(
                 "\\",
@@ -415,66 +391,6 @@ Caller correction 只有在以下条件满足时允许：
             ].keys()
         )
     )
-
-    # ==========================================================
-    # 🔥 Preflight dependency scan
-    # 自动扩展 target_files
-    # 避免 waterfall repair
-    # ==========================================================
-    auto_targets = set(target_files)
-    repo_files = state.get("repo_files", {})
-
-    for file_path, code in repo_files.items():
-        try:
-            tree = ast.parse(code)
-        except Exception:
-            continue
-
-        for node in ast.walk(tree):
-            # --------------------------------
-            # from xxx import yyy
-            # --------------------------------
-            if isinstance(node, ast.ImportFrom):
-                module_name = node.module
-                if not module_name:
-                    continue
-
-                expected_file = module_name.replace(".", "/") + ".py"
-
-                # module 不存在
-                if expected_file not in repo_files:
-                    auto_targets.add(file_path)
-                    continue
-
-                target_code = repo_files.get(expected_file, "")
-                try:
-                    target_tree = ast.parse(target_code)
-                except Exception:
-                    continue
-
-                exported_symbols = {
-                    n.name
-                    for n in ast.walk(target_tree)
-                    if isinstance(n, ast.FunctionDef)
-                }
-
-                for alias in node.names:
-                    if alias.name not in exported_symbols:
-                        auto_targets.add(file_path)
-                        auto_targets.add(expected_file)
-
-            # --------------------------------
-            # import xxx
-            # --------------------------------
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    module_name = alias.name
-                    expected_file = module_name.replace(".", "/") + ".py"
-
-                    if expected_file not in repo_files:
-                        auto_targets.add(file_path)
-
-    target_files = list(auto_targets)
 
     print(
         f"🎯 目标文件: "

@@ -243,7 +243,18 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
         # =====================================================
         # Plugin Pipeline
         # =====================================================
-        if final_state.get("is_fixed"):
+        repairable = final_state.get(
+            "repairable",
+            True
+        )
+
+        is_fixed = final_state.get(
+            "is_fixed",
+            False
+        )
+
+        if is_fixed:
+
             print(
                 "\n[Step 5] 🧩 "
                 "执行 Plugin System..."
@@ -268,10 +279,19 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
             final_state[
                 "repo_files"
             ] = updated_repo_files
-        else:
+
+        elif not repairable:
+
             print(
                 "\n⏭️ [Plugin] "
-                "跳过插件流水线（修复未成功）"
+                "跳过插件流水线（Diagnose 判定不可自动修复）"
+            )
+
+        else:
+
+            print(
+                "\n⏭️ [Plugin] "
+                "跳过插件流水线（修复失败）"
             )
 
         print(
@@ -279,13 +299,27 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
             "=================================================="
         )
 
-        if final_state.get(
-            "is_fixed"
-        ):
+        if is_fixed:
 
             print(
                 "🎉 修复成功"
             )
+
+        elif not repairable:
+
+            print(
+                "🛑 自动修复终止（需人工决策）"
+            )
+
+            reason = final_state.get(
+                "repairability_reason",
+                ""
+            )
+
+            if reason:
+                print(
+                    f"原因: {reason}"
+                )
 
         else:
 

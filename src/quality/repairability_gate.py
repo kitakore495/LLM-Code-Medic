@@ -57,6 +57,22 @@ class RepairabilityGate:
         )
 
         # ==================================================
+        # 0. FIRST-ROUND HARD ESCALATION
+        # diagnose 已明确判定无法自动修复
+        # ==================================================
+        hard_escalate = any([
+            "ESCALATE_REQUIRED" in analysis,
+            "NO_VALID_CALLER_VALUE" in analysis,
+            "CALLER_VALUE_NOT_DERIVABLE" in analysis,
+            "AUTO_REPAIR_NOT_POSSIBLE" in analysis,
+        ])
+
+        if hard_escalate:
+            reasons.append(
+                "Diagnose 判定当前缺少可推导修复值，必须升级人工决策"
+            )
+
+        # ==================================================
         # 1. Diagnose / Repair 主动升级
         # ==================================================
         escalate_detected = (
@@ -111,6 +127,7 @@ class RepairabilityGate:
 
         # ==================================================
         # 5. Verify loop detection
+        # 保持 >=2，不要改成1
         # ==================================================
         same_error_loop = False
 
