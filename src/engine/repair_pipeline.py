@@ -118,9 +118,15 @@ class RepairPipeline:
             )
         )
 
-        project_map_context = (
-            scanner.scan()
-        )
+        scan_result = scanner.scan_project()
+
+        project_map_context = scan_result["tree"]
+
+        export_table = scan_result["export_table"]
+
+        call_graph = scan_result["call_graph"]
+
+        import_graph = scan_result["import_graph"]
 
         print(
             "✅ 全景地图绘制完毕。"
@@ -266,6 +272,15 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
 
             "_pending_authorization":
                 "",
+
+            "export_table":
+                export_table,
+
+            "call_graph":
+                 call_graph,
+
+            "import_graph":
+                import_graph,
         }
 
         print(

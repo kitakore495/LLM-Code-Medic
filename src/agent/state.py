@@ -50,3 +50,7 @@ class AgentState(TypedDict):
 
     _pending_repair_mode: str
     _pending_authorization: str
+
+    export_table: Dict
+    call_graph: Dict
+    import_graph: Dict

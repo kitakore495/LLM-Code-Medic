@@ -21,6 +21,9 @@ from src.quality.repairability_gate import (
 )
 from src.quality.semantic_patch_gate import SemanticPatchGate
 from src.tools.executor import CodeExecutor
+from src.tools.ast_resolver import (
+    expand_target_files
+)
 
 # 初始化环境变量
 ROOT_DIR = os.path.dirname(
@@ -36,16 +39,135 @@ def parse_patch_response(raw_text: str):
         r"<<<FILE_PATH:\s*(.*?)>>>(.*?)<<<FILE_END>>>", re.DOTALL
     )
     matches = pattern.findall(raw_text)
-    print(f"\n📝 已解析补丁块数量: {len(matches)}")
+    print(f"""
+📝 已解析补丁块数量: {len(matches)}""")
 
     for relative_path, code in matches:
         relative_path = relative_path.strip().replace("\\", "/")
         relative_path = re.sub(r"^(tests/[^/]+/|v\d+/)", "", relative_path)
         repo_updates[relative_path] = code.strip()
-        print(f"    -> 已更新: {relative_path} ({len(code)} bytes)")
+        print(f"""    -> 已更新: {relative_path} ({len(code)} bytes)""")
 
     return repo_updates
 
+def build_ast_context(state):
+
+    import json
+
+    export_table = state.get(
+        "export_table",
+        {}
+    )
+
+    call_graph = state.get(
+        "call_graph",
+        {}
+    )
+
+    import_graph = state.get(
+        "import_graph",
+        {}
+    )
+
+    return f"""
+========================
+【EXPORT TABLE】
+========================
+{json.dumps(
+    export_table,
+    indent=2,
+    ensure_ascii=False
+)}
+
+========================
+【CALL GRAPH】
+========================
+{json.dumps(
+    call_graph,
+    indent=2,
+    ensure_ascii=False
+)}
+
+========================
+【IMPORT GRAPH】
+========================
+{json.dumps(
+    import_graph,
+    indent=2,
+    ensure_ascii=False
+)}
+"""
+def build_symbol_index(state):
+
+    export_table = state.get(
+        "export_table",
+        {}
+    )
+
+    index = {}
+
+    for (
+        file_path,
+        info
+    ) in export_table.items():
+
+        for symbol in info.get(
+            "exports",
+            []
+        ):
+
+            index[
+                symbol
+            ] = file_path
+
+    return index
+
+def resolve_symbol(
+    state,
+    symbol_name
+):
+
+    symbol_index = (
+        build_symbol_index(
+            state
+        )
+    )
+
+    if symbol_name in symbol_index:
+
+        return symbol_index[
+            symbol_name
+        ]
+
+    symbol_lower = (
+        symbol_name.lower()
+    )
+
+    for (
+        symbol,
+        file_path
+    ) in symbol_index.items():
+
+        if (
+            symbol.lower()
+            == symbol_lower
+        ):
+
+            return file_path
+
+    for (
+        symbol,
+        file_path
+    ) in symbol_index.items():
+
+        if (
+            symbol_lower
+            in symbol.lower()
+        ):
+
+            return file_path
+
+    return None
 
 def create_diagnose_llm():
     return (
@@ -113,16 +235,20 @@ def build_gate_constraints(
     ):
         rules += [
             "⚠️  SANDBOX_LOOP DETECTED — MANDATORY CONSTRAINT:",
-            f"  repair_attempts={repair_attempts}, sandbox still failing with exception.",
+            f"""  repair_attempts={repair_attempts}, sandbox still failing with exception.""",
             "- If callee already has `raise` after previous repairs: DO NOT touch callee guard.",
             "- Perform LOOP_CHECK: does the caller pass a value that violates callee contract?",
             "- If YES: fix the caller. The callee is already correct.",
             "- If the caller's value cannot be corrected without inventing a business value:",
-            "  output ESCALATE_REQUIRED and stop.",
+            """  output ESCALATE_REQUIRED and stop.""",
         ]
 
     return "\n".join(rules) if rules else "N/A"
 
+
+import json
+import re
+from langchain_core.messages import SystemMessage, HumanMessage
 
 def diagnose_node(state: AgentState):
     print(f"\n🚀 [Diagnose] 第 {state.get('repair_attempts', 0) + 1} 轮诊断...")
@@ -131,19 +257,134 @@ def diagnose_node(state: AgentState):
 
     repo_snapshot_text = "\n".join(
         [
-            f"\n===== FILE: {path} =====\n{code}"
+            f"""
+===== FILE: {path} =====
+{code}"""
             for path, code in state["repo_files"].items()
         ]
     )
+    
+    # --------------------------------------------------------
+    # 1. 顶层提取 AST 图谱数据与符号索引
+    # --------------------------------------------------------
+    _current_export_table = state.get("export_table", {})
+    _current_call_graph = state.get("call_graph", {})
+    _current_import_graph = state.get("import_graph", {})
+    
+    _current_symbol_index = build_symbol_index(state)
+    ast_context = build_ast_context(state)
+
+    # --------------------------------------------------------
+    # 2. 规范化调试打印输出
+    # --------------------------------------------------------
+    print("\n📊 ExportTable:")
+    print(len(_current_export_table))
+
+    print("📊 SymbolIndex:")
+    print(len(_current_symbol_index))
+
+    print("📊 CallGraph:")
+    print(len(_current_call_graph))
+
+    print("📊 ImportGraph:")
+    print(len(_current_import_graph))
+
     repair_history_text = "\n\n".join(state.get("repair_history", []))
     repair_attempts = state.get("repair_attempts", 0)
     sandbox_stderr = state.get("sandbox_stderr", "")
-
+    
     loop_hint = ""
     if repair_attempts >= 1 and sandbox_stderr:
-        loop_hint = f"========================\n【⚠️ VERIFY-LOOP SIGNAL】\nrepair_attempts = {repair_attempts}\nsandbox 仍然失败，stderr 如下：\n{sandbox_stderr}\n执行 PHASE 2 VERIFY-LOOP DETECTION：\nLOOP_CHECK_1: stderr 与上一轮是否为同类异常？\nLOOP_CHECK_2: 上一轮是否只修改了 callee 文件？\nLOOP_CHECK_3: callee 是否已包含 raise？\n如果三项均为 YES：ROOT_CAUSE_CLASS 必须重新判定为 [CALLER_VIOLATED]，且 TARGET_FILES 必须包含 caller 文件。禁止继续只修改 callee。"
+        loop_hint = f"""========================
+【⚠️ VERIFY-LOOP SIGNAL】
+repair_attempts = {repair_attempts}
+sandbox 仍然失败，stderr 如下：
+{sandbox_stderr}
+执行 PHASE 2 VERIFY-LOOP DETECTION：
+LOOP_CHECK_1: stderr 与上一轮是否为同类异常？
+LOOP_CHECK_2: 上一轮是否只修改了 callee 文件？
+LOOP_CHECK_3: callee 是否已包含 raise？
+如果三项均为 YES：ROOT_CAUSE_CLASS 必须重新判定为 [CALLER_VIOLATED]，且 TARGET_FILES 必须包含 caller 文件。禁止继续只修改 callee。"""
 
-    user_prompt = f"请诊断当前项目故障。\n禁止修复。禁止输出代码。\n你的职责仅为：\n1. 根因定位\n2. ROOT_CAUSE_CLASS 判定\n3. REPAIR_SCOPE 推断\n4. TARGET_FILES 推断\n5. BUG_INVENTORY 全量扫描（见下方约束）\n\n========================\n【历史根因分析】\n========================\n{state.get('analysis', '首次诊断')}\n\n========================\n【项目源码】\n========================\n{repo_snapshot_text}\n\n========================\n【Patch Gate Failure】\n========================\n{state.get('patch_quality_reason', '')}\n\n========================\n【Semantic Gate Failure】\n========================\n{state.get('semantic_gate_reason', '')}\n\n========================\n【历史失败修复】\n========================\n{repair_history_text}\n\n========================\n【最近一次 stderr】\n========================\n{sandbox_stderr}\n{loop_hint}\n\n========================\n【沙箱执行约定 — Import 路径规则】\n========================\n所有源码文件在沙箱执行时写入同一执行目录（扁平布局）。\nimport 只能使用模块名本身（= 文件名去掉 .py），不允许含目录层级。\n正确：from validator import validate_dataset\n错误：from some.nested.path.validator import validate_dataset\n\n========================\n【BUG_INVENTORY 强制扫描约束】\n========================\n在输出 TARGET_FILES 之前，必须对所有涉及文件执行完整扫描：\nCHECK-1: 被 import 的模块名是否存在于 repo_files？\nCHECK-2: 被 import 的 symbol 是否在该模块中实际定义？（必须读源码确认）\nCHECK-3: 调用的函数名是否与 callee 定义完全匹配？\nCHECK-4: 传入的参数名称和数量是否与函数签名完全匹配？（必须读 callee 源码）\nCHECK-5: 字符串/路径字面量参数是否可被 repo_files 中的具名常量替代？\n将所有不合法条目列入 BUG_INVENTORY。repair 必须一次性修复全部条目。\n\n========================\n【诊断约束】\n========================\n程序运行成功 ≠ 修复成功。\nCaller correction 只有在 ROOT_CAUSE_CLASS == [CALLER_VIOLATED] 且修正值可从项目常量、配置、命名语义、文档契约中推导时允许。\n如果无法推导：输出 ESCALATE_REQUIRED。\n严格按照 DIAGNOSE_SYSTEM_PROMPT 格式输出，必须包含 LOOP_CHECK 和 BUG_INVENTORY 段落。"
+    # --------------------------------------------------------
+    # 3. 干净装配的组装 Prompt（移除了冗余的旧 Dump）
+    # --------------------------------------------------------
+    user_prompt = f"""请诊断当前项目故障。
+禁止修复。禁止输出代码。
+你的职责仅为：
+1. 根因定位
+2. ROOT_CAUSE_CLASS 判定
+3. REPAIR_SCOPE 推断
+4. TARGET_FILES 推断
+5. BUG_INVENTORY 全量扫描（见下方约束）
+
+========================
+【历史根因分析】
+========================
+{state.get('analysis', '首次诊断')}
+
+========================
+【AST Symbol Index】
+========================
+{json.dumps(_current_symbol_index, indent=2, ensure_ascii=False)}
+
+========================
+【AST工程索引】
+========================
+{ast_context}
+
+========================
+【项目源码】
+========================
+{repo_snapshot_text}
+
+========================
+【Patch Gate Failure】
+========================
+{state.get('patch_quality_reason', '')}
+
+========================
+【Semantic Gate Failure】
+========================
+{state.get('semantic_gate_reason', '')}
+
+========================
+【历史失败修复】
+========================
+{repair_history_text}
+
+========================
+【最近一次 stderr】
+========================
+{sandbox_stderr}
+{loop_hint}
+
+========================
+【沙箱执行约定 — Import 路径规则】
+========================
+所有源码文件在沙箱执行时写入同一执行目录（扁平布局）。
+import 只能使用模块名本身（= 文件名去掉 .py），不允许含目录层级。
+正确：from validator import validate_dataset
+错误：from some.nested.path.validator import validate_dataset
+
+========================
+【BUG_INVENTORY 强制扫描约束】
+========================
+在输出 TARGET_FILES 之前，必须对所有涉及文件执行完整扫描：
+CHECK-1: 被 import 的模块名是否存在于 repo_files？
+CHECK-2: 被 import 的 symbol 是否在该模块中实际定义？（必须读源码确认）
+CHECK-3: 调用的函数名是否与 callee 定义完全匹配？
+CHECK-4: 传入的参数名称和数量是否与函数签名完全匹配？（必须读 callee 源码）
+CHECK-5: 字符串/路径字面量参数是否可被 repo_files 中的具名常量替代？
+将所有不合法条目列入 BUG_INVENTORY。repair 必须一次性修复全部条目。
+
+========================
+【诊断约束】
+========================
+程序运行成功 ≠ 修复成功。
+Caller correction 只有在 ROOT_CAUSE_CLASS == [CALLER_VIOLATED] 且修正值可从项目常量、配置、命名语义、文档契约中推导时允许。
+如果无法推导：输出 ESCALATE_REQUIRED。
+严格按照 DIAGNOSE_SYSTEM_PROMPT 格式输出，必须包含 LOOP_CHECK 和 BUG_INVENTORY 段落。"""
 
     response = LLMInvoker.invoke(
         provider=provider,
@@ -177,12 +418,32 @@ def diagnose_node(state: AgentState):
         if p.endswith(".py") and ".." not in p:
             cleaned.append(p)
 
-    target_files = list(dict.fromkeys(cleaned)) or list(
-        state["repo_files"].keys()
+    # 1. 先去重并获取初步列表
+    target_files = list(dict.fromkeys(cleaned))
+
+    # --------------------------------------------------------
+    # 4. 安全调用全依赖感知的扩展函数（完美对齐 5 参数签名）
+    # --------------------------------------------------------
+    target_files = expand_target_files(
+        target_files,
+        _current_export_table,
+        _current_call_graph,
+        _current_import_graph,
+        _current_symbol_index
+    )
+
+    # 5. 最终赋值兜底
+    target_files = (
+        target_files 
+        or list(state["repo_files"].keys())
     )
     print(f"🎯 目标文件: {target_files}")
-    return {**state, "analysis": analysis, "target_files": target_files}
-
+    
+    return {
+        **state,
+        "analysis": analysis,
+        "target_files": target_files
+    }
 
 def repair_node(state: AgentState):
     print("🛠️ [Repair] 正在生成多文件补丁...")
@@ -191,7 +452,9 @@ def repair_node(state: AgentState):
 
     full_repo_snapshot = "\n".join(
         [
-            f"\n===== FILE: {path} =====\n{code}"
+            f"""
+===== FILE: {path} =====
+{code}"""
             for path, code in state["repo_files"].items()
         ]
     )
@@ -207,7 +470,58 @@ def repair_node(state: AgentState):
 
     authorization_context = build_authorization_context(state)
 
-    user_prompt = f"请修复当前项目。\n\n========================\n【根因分析（含 BUG_INVENTORY）】\n========================\n{state.get('analysis', '未提供根因分析')}\n\n========================\n【完整项目源码（只读参考）】\n========================\n{full_repo_snapshot}\n\n========================\n【允许修改文件】\n========================\n{editable_targets}\n规则：可读取整个 repo，只允许输出 target_files 中的文件，其他文件仅作为 dependency / contract 参考。\n\n========================\n【Semantic Gate Failure】\n========================\n{state.get('semantic_gate_reason', '')}\n\n========================\n【Policy Gate Failure】\n========================\n{state.get('policy_gate_reason', '')}\n\n========================\n【历史失败修复】\n========================\n{repair_history_text}\n\n========================\n【最近一次 stderr】\n========================\n{state.get('sandbox_stderr', '')}\n\n========================\n【修复要求】\n========================\n1. 严格遵循 ROOT_CAUSE_CLASS\n2. 修复 BUG_INVENTORY 中全部条目（禁止 waterfall repair）\n3. 禁止发明 business 值\n4. 无合法方案时：ESCALATE_REQUIRED: reason\n\n========================\n【🛡️ 动态门禁强制约束】\n========================\n{gate_constraints}\n\n{authorization_context}"
+    user_prompt = f"""请修复当前项目。
+
+========================
+【根因分析（含 BUG_INVENTORY）】
+========================
+{state.get('analysis', '未提供根因分析')}
+
+========================
+【完整项目源码（只读参考）】
+========================
+{full_repo_snapshot}
+
+========================
+【允许修改文件】
+========================
+{editable_targets}
+规则：可读取整个 repo，只允许输出 target_files 中的文件，其他文件仅作为 dependency / contract 参考。
+
+========================
+【Semantic Gate Failure】
+========================
+{state.get('semantic_gate_reason', '')}
+
+========================
+【Policy Gate Failure】
+========================
+{state.get('policy_gate_reason', '')}
+
+========================
+【历史失败修复】
+========================
+{repair_history_text}
+
+========================
+【最近一次 stderr】
+========================
+{state.get('sandbox_stderr', '')}
+
+========================
+【修复要求】
+========================
+1. 严格遵循 ROOT_CAUSE_CLASS
+2. 修复 BUG_INVENTORY 中全部条目（禁止 waterfall repair）
+3. 禁止发明 business 值
+4. 无合法方案时：ESCALATE_REQUIRED: reason
+
+========================
+【🛡️ 动态门禁强制约束】
+========================
+{gate_constraints}
+
+{authorization_context}"""
 
     response = LLMInvoker.invoke(
         provider=provider,
@@ -219,13 +533,16 @@ def repair_node(state: AgentState):
         temperature=0.1,
     )
     raw_patch = response.content
-    print(
-        f"\n================ LLM PATCH RAW ================\n{raw_patch}\n========================================="
-    )
+    print(f"""
+================ LLM PATCH RAW ================
+{raw_patch}
+=========================================""")
 
     history = list(state.get("repair_history", []))
     history.append(
-        f"[LLM PATCH]\nattempt={state.get('repair_attempts', 0)}\n{raw_patch}"
+        f"""[LLM PATCH]
+attempt={state.get('repair_attempts', 0)}
+{raw_patch}"""
     )
 
     updates = parse_patch_response(raw_patch)
@@ -242,7 +559,8 @@ def repair_node(state: AgentState):
 
 
 def repairability_gate_node(state: AgentState):
-    print("\n🔍 [Repairability Gate] 检查当前问题是否可自动修复...")
+    print("""
+🔍 [Repairability Gate] 检查当前问题是否可自动修复...""")
     gate = RepairabilityGate()
     repairable, reason, options, needs_decision = gate.check(state)
  
@@ -263,9 +581,12 @@ def repairability_gate_node(state: AgentState):
         }
  
     # 不可修复 → 在节点里做用户交互，把授权写入 state
-    print(f"❌ [RepairabilityGate] 当前约束下无法自动修复\n原因: {reason}")
+    print(f"""❌ [RepairabilityGate] 当前约束下无法自动修复
+原因: {reason}""")
     history = list(state.get("repair_history", []))
-    history.append(f"[RepairabilityGate]\nUNREPAIRABLE_UNDER_CONSTRAINTS\nreason={reason}")
+    history.append(f"""[RepairabilityGate]
+UNREPAIRABLE_UNDER_CONSTRAINTS
+reason={reason}""")
  
     should_continue_flag, mode, auth_context = prompt_user_authorization(
         unrepairable_reason=reason,
@@ -298,7 +619,7 @@ def repairability_gate_node(state: AgentState):
         "repair_options": options,
         "needs_user_decision": needs_decision,
         "repair_history": history,
-        "repair_mode": mode,               # ← 直接写入，不用 _pending 中转
+        "repair_mode": mode,              # ← 直接写入，不用 _pending 中转
         "user_authorization": auth_context,
         "is_unrepairable": False,
         "_pending_repair_mode": "",
@@ -307,7 +628,8 @@ def repairability_gate_node(state: AgentState):
  
 
 def semantic_patch_gate_node(state: AgentState):
-    print("\n🧠 [Semantic Patch Gate] 正在检查语义补丁质量...")
+    print("""
+🧠 [Semantic Patch Gate] 正在检查语义补丁质量...""")
     gate = SemanticPatchGate()
     passed, reason = gate.check(
         repo_files=state.get("repo_files", {}),
@@ -321,9 +643,12 @@ def semantic_patch_gate_node(state: AgentState):
     if passed:
         print("✅ [Semantic Patch Gate] 检查通过")
     else:
-        print(f"❌ [Semantic Patch Gate] 检查失败\n原因: {reason}")
+        print(f"""❌ [Semantic Patch Gate] 检查失败
+原因: {reason}""")
         history.append(
-            f"[Semantic Patch Failure]\nreason={reason}\nrepair_attempts={state.get('repair_attempts', 0)}"
+            f"""[Semantic Patch Failure]
+reason={reason}
+repair_attempts={state.get('repair_attempts', 0)}"""
         )
 
     return {
@@ -335,7 +660,8 @@ def semantic_patch_gate_node(state: AgentState):
 
 
 def verify_node(state: AgentState):
-    print("\n🧪 [Verify] 正在进行沙箱验证...")
+    print("""
+🧪 [Verify] 正在进行沙箱验证...""")
     current_repo_files = state.get("repo_files", {})
     executor = CodeExecutor(repo_root=state["repo_root"])
     success, error_log = False, ""
@@ -349,7 +675,8 @@ def verify_node(state: AgentState):
         elif hasattr(res, "returncode"):
             success = res.returncode == 0
             error_log = (
-                f"STDOUT: {getattr(res,'stdout','')}\nSTDERR: {getattr(res,'stderr','')}"
+                f"""STDOUT: {getattr(res,'stdout','')}
+STDERR: {getattr(res,'stderr','')}"""
                 if not success
                 else ""
             )
@@ -359,12 +686,15 @@ def verify_node(state: AgentState):
         import traceback
 
         success = False
-        error_log = f"Critical sandbox wrapper crash: {str(e)}\n{traceback.format_exc()}"
+        error_log = f"""Critical sandbox wrapper crash: {str(e)}
+{traceback.format_exc()}"""
 
     if success:
-        print("\n🎉 [Graph] 沙箱验证完全通过！")
+        print("""
+🎉 [Graph] 沙箱验证完全通过！""")
     else:
-        print("\n❌ [Graph] 沙箱验证遭遇失败！")
+        print("""
+❌ [Graph] 沙箱验证遭遇失败！""")
 
     return {
         **state,
@@ -383,7 +713,8 @@ def verify_node(state: AgentState):
 
 
 def patch_quality_gate_node(state: AgentState):
-    print("\n🧪 [Patch Quality Gate] 正在检查补丁质量...")
+    print("""
+🧪 [Patch Quality Gate] 正在检查补丁质量...""")
     gate = PatchQualityGate()
     passed, reason = gate.check(
         analysis=state.get("analysis", ""),
@@ -396,7 +727,9 @@ def patch_quality_gate_node(state: AgentState):
     if not passed:
         print(f"❌ [Patch Quality Gate] 检查失败: {reason}")
         history.append(
-            f"[Patch Gate Failure]\nreason={reason}\nrepair_attempts={state.get('repair_attempts', 0)}"
+            f"""[Patch Gate Failure]
+reason={reason}
+repair_attempts={state.get('repair_attempts', 0)}"""
         )
     else:
         print("✅ [Patch Quality Gate] 检查通过")
@@ -410,7 +743,8 @@ def patch_quality_gate_node(state: AgentState):
 
 
 def policy_gate_node(state: AgentState):
-    print("\n🧠 [Policy Gate] 正在检查修复策略违规...")
+    print("""
+🧠 [Policy Gate] 正在检查修复策略违规...""")
     repair_mode = state.get("repair_mode", "STRICT")
     print(f"[DEBUG] policy_gate: repair_mode={repair_mode}")
 
@@ -484,11 +818,13 @@ def should_continue_after_policy_gate(state: AgentState):
 
 def should_continue_after_repairability(state: AgentState):
     if state.get("repair_attempts", 0) >= 5:
-        print("\n💀 [Routing] 达到最大修复轮次 (5次)，强制终止")
+        print("""
+💀 [Routing] 达到最大修复轮次 (5次)，强制终止""")
         return "stop"
  
     repair_status = state.get("repair_status", "REPAIRABLE")
-    print(f"\n[DEBUG] repair_status = {repair_status}")
+    print(f"""
+[DEBUG] repair_status = {repair_status}""")
     print(f"[DEBUG] repair_mode = {state.get('repair_mode', 'STRICT')}")
  
     if repair_status == "TERMINATED_BY_USER":
@@ -509,14 +845,12 @@ def should_continue_after_repairability(state: AgentState):
 
 def should_continue_after_verify(state: AgentState) -> str:
     if state.get("verify_passed", False) or state.get("is_fixed", False):
-        print(
-            "\n🏁 [Graph-Routing] 沙箱测试完全通过！正在退出状态机并完成修复。..."
-        )
+        print("""
+🏁 [Graph-Routing] 沙箱测试完全通过！正在退出状态机并完成修复。...""")
         return "end"
 
-    print(
-        "\n🔁 [Graph-Routing] 沙箱仍存在报错，正在送入 RepairabilityGate 分析..."
-    )
+    print("""
+🔁 [Graph-Routing] 沙箱仍存在报错，正在送入 RepairabilityGate 分析...""")
     return "repairability_gate"
 
 

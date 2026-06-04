@@ -5,6 +5,7 @@ import ast
 class ProjectScanner:
 
     def __init__(self, repo_root="."):
+
         self.repo_root = os.path.abspath(repo_root)
 
         self.ignore_list = {
@@ -16,57 +17,291 @@ class ProjectScanner:
             ".vscode"
         }
 
-    def _get_py_info(self, file_path):
+        self.export_table = {}
+        self.import_graph = {}
+        self.call_graph = {}
+
+    def _parse_python_file(self, file_path):
+
+        result = {
+            "classes": [],
+            "functions": [],
+            "imports": [],
+            "exports": [],
+            "calls": []
+        }
 
         try:
+
             with open(
                 file_path,
                 "r",
                 encoding="utf-8"
             ) as f:
-                node = ast.parse(f.read())
 
-            classes = [
-                n.name
-                for n in node.body
-                if isinstance(n, ast.ClassDef)
+                source = f.read()
+
+            tree = ast.parse(source)
+
+            # ==================================
+            # Classes
+            # ==================================
+            result["classes"] = [
+                node.name
+                for node in tree.body
+                if isinstance(
+                    node,
+                    ast.ClassDef
+                )
             ]
 
-            functions = [
-                n.name
-                for n in node.body
-                if isinstance(n, ast.FunctionDef)
+            # ==================================
+            # Functions
+            # ==================================
+            result["functions"] = [
+                node.name
+                for node in tree.body
+                if isinstance(
+                    node,
+                    ast.FunctionDef
+                )
             ]
 
-            info = []
+            # ==================================
+            # Imports
+            # ==================================
+            imports = []
 
-            if classes:
-                info.append(
-                    f"classes: {', '.join(classes)}"
-                )
+            for node in ast.walk(tree):
 
-            if functions:
-                info.append(
-                    f"defs: {', '.join(functions)}"
-                )
+                if isinstance(
+                    node,
+                    ast.Import
+                ):
 
-            return (
-                f" ({' | '.join(info)})"
-                if info
-                else ""
+                    for alias in node.names:
+
+                        imports.append({
+                            "type": "import",
+                            "module": alias.name,
+                            "symbol": None
+                        })
+
+                elif isinstance(
+                    node,
+                    ast.ImportFrom
+                ):
+
+                    module = (
+                        node.module
+                        or ""
+                    )
+
+                    for alias in node.names:
+
+                        imports.append({
+                            "type": "from",
+                            "module": module,
+                            "symbol": alias.name
+                        })
+
+            result["imports"] = imports
+
+            # ==================================
+            # Calls
+            # ==================================
+            calls = []
+
+            for node in ast.walk(tree):
+
+                if not isinstance(
+                    node,
+                    ast.Call
+                ):
+                    continue
+
+                func_name = None
+
+                if isinstance(
+                    node.func,
+                    ast.Name
+                ):
+
+                    func_name = (
+                        node.func.id
+                    )
+
+                elif isinstance(
+                    node.func,
+                    ast.Attribute
+                ):
+
+                    func_name = (
+                        node.func.attr
+                    )
+
+                if func_name:
+
+                    calls.append(
+                        func_name
+                    )
+
+            result["calls"] = list(
+                set(calls)
             )
 
+            # ==================================
+            # Exports
+            # ==================================
+            exports = []
+
+            exports.extend(
+                result["classes"]
+            )
+
+            exports.extend(
+                result["functions"]
+            )
+
+            result["exports"] = exports
+
+            return result
+
         except Exception:
+
+            return None
+
+    def _build_file_info(
+        self,
+        parsed_info
+    ):
+
+        if not parsed_info:
             return " (parse error)"
+
+        info = []
+
+        if parsed_info["classes"]:
+
+            info.append(
+                "classes: "
+                + ", ".join(
+                    parsed_info["classes"]
+                )
+            )
+
+        if parsed_info["functions"]:
+
+            info.append(
+                "defs: "
+                + ", ".join(
+                    parsed_info["functions"]
+                )
+            )
+
+        if parsed_info["imports"]:
+
+            info.append(
+                f"imports: {len(parsed_info['imports'])}"
+            )
+
+        if parsed_info["calls"]:
+
+            info.append(
+                f"calls: {len(parsed_info['calls'])}"
+            )
+
+        return (
+            f" ({' | '.join(info)})"
+            if info
+            else ""
+        )
+
+    def _build_import_graph(self):
+
+        graph = {}
+
+        for file_path, info in self.export_table.items():
+
+            imports = []
+
+            for imp in info["imports"]:
+
+                module = imp["module"]
+
+                if module:
+
+                    imports.append(
+                        module
+                    )
+
+            graph[file_path] = list(
+                set(imports)
+            )
+
+        self.import_graph = graph
+
+    def _build_call_graph(self):
+
+        graph = {}
+
+        all_exports = {}
+
+        for file_path, info in self.export_table.items():
+
+            for symbol in info["exports"]:
+
+                all_exports[
+                    symbol
+                ] = file_path
+
+        for file_path, info in self.export_table.items():
+
+            called_files = []
+
+            for call_name in info["calls"]:
+
+                if (
+                    call_name
+                    in all_exports
+                ):
+
+                    target_file = (
+                        all_exports[
+                            call_name
+                        ]
+                    )
+
+                    if (
+                        target_file
+                        != file_path
+                    ):
+
+                        called_files.append(
+                            target_file
+                        )
+
+            graph[file_path] = list(
+                set(called_files)
+            )
+
+        self.call_graph = graph
 
     def scan(self):
 
+        self.export_table = {}
+        self.import_graph = {}
+        self.call_graph = {}
+
         tree = []
 
-        for root, dirs, files in os.walk(self.repo_root):
+        for root, dirs, files in os.walk(
+            self.repo_root
+        ):
 
             dirs[:] = [
-                d for d in dirs
+                d
+                for d in dirs
                 if d not in self.ignore_list
             ]
 
@@ -75,7 +310,9 @@ class ProjectScanner:
                 ""
             ).count(os.sep)
 
-            indent = " " * 4 * level
+            indent = (
+                " " * 4 * level
+            )
 
             folder_name = (
                 os.path.basename(root)
@@ -86,29 +323,107 @@ class ProjectScanner:
                 f"{indent}📂 {folder_name}/"
             )
 
-            sub_indent = " " * 4 * (level + 1)
+            sub_indent = (
+                " " * 4 * (level + 1)
+            )
 
-            for f in files:
+            for file_name in files:
 
                 if (
-                    f.endswith(".py")
-                    and f != "__init__.py"
+                    not file_name.endswith(".py")
+                    or file_name == "__init__.py"
                 ):
+                    continue
 
-                    full_path = os.path.join(root, f)
+                full_path = os.path.join(
+                    root,
+                    file_name
+                )
 
-                    py_info = self._get_py_info(
+                rel_path = os.path.relpath(
+                    full_path,
+                    self.repo_root
+                ).replace(
+                    "\\",
+                    "/"
+                )
+
+                parsed_info = (
+                    self._parse_python_file(
                         full_path
                     )
+                )
 
-                    tree.append(
-                        f"{sub_indent}📄 {f}{py_info}"
-                    )
+                if parsed_info:
 
-        return "\n".join(tree)
+                    self.export_table[
+                        rel_path
+                    ] = parsed_info
+
+                tree.append(
+                    f"{sub_indent}📄 "
+                    f"{file_name}"
+                    f"{self._build_file_info(parsed_info)}"
+                )
+
+        self._build_import_graph()
+        self._build_call_graph()
+
+        return {
+            "tree":
+                "\n".join(tree),
+
+            "export_table":
+                self.export_table,
+
+            "call_graph":
+                self.call_graph,
+
+            "import_graph":
+                self.import_graph,
+        }
+
+    def scan_project(self):
+
+        return self.scan()
+
+    def get_export_table(self):
+
+        return self.export_table
+
+    def get_call_graph(self):
+
+        return self.call_graph
+
+    def get_import_graph(self):
+
+        return self.import_graph
 
 
 if __name__ == "__main__":
+
     scanner = ProjectScanner()
 
-    print(scanner.scan())
+    result = scanner.scan()
+
+    print(result["tree"])
+
+    print("\n===== EXPORT TABLE =====\n")
+
+    from pprint import pprint
+
+    pprint(
+        scanner.get_export_table()
+    )
+
+    print("\n===== IMPORT GRAPH =====\n")
+
+    pprint(
+        scanner.get_import_graph()
+    )
+
+    print("\n===== CALL GRAPH =====\n")
+
+    pprint(
+        scanner.get_call_graph()
+    )
