@@ -168,6 +168,7 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
         # =====================================================
         initial_state = {
 
+            # ── 基础路径与元数据 ──────────────────────────────
             "repo_root":
                 self.repo_root,
 
@@ -177,17 +178,20 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
             "error_message":
                 INITIAL_ERROR,
 
+            # ── 文件操作相关 ──────────────────────────────────
             "target_files":
                 [],
 
-            # 当前仓库
             "repo_files":
                 initial_repo_files.copy(),
 
-            # 原始快照（Gate比较用）
             "original_repo_files":
                 initial_repo_files.copy(),
 
+            "repaired_repo_files":
+                {},
+
+            # ── 状态控制 ──────────────────────────────────────
             "repair_attempts":
                 0,
 
@@ -197,26 +201,71 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
             "analysis":
                 "",
 
-            # sandbox
+            # ── 沙箱与验证 ────────────────────────────────────
             "sandbox_stdout":
                 "",
 
             "sandbox_stderr":
                 "",
 
-            # patch gate
+            "verify_passed":
+                False,
+
+            # ── Patch Quality Gate ────────────────────────────
             "patch_quality_passed":
                 False,
 
             "patch_quality_reason":
                 "",
 
-            # semantic gate
+            # ── Semantic Gate ─────────────────────────────────
             "semantic_gate_passed":
                 False,
 
             "semantic_gate_reason":
-                ""
+                "",
+
+            # ── Policy Gate ───────────────────────────────────
+            "policy_gate_passed":
+                False,
+
+            "policy_gate_reason":
+                "",
+
+            # ── Repairability Gate ────────────────────────────
+            "repairable":
+                True,
+
+            "repairability_reason":
+                "",
+
+            "repair_options":
+                [],
+
+            "needs_user_decision":
+                False,
+
+            "repair_status":
+                "",
+
+            # ── 授权控制 ──────────────────────────────────────
+            "repair_mode":
+                "STRICT",
+
+            "user_authorization":
+                "",
+
+            "is_unrepairable":
+                False,
+
+            "unrepairable_reason":
+                "",
+
+            "_pending_repair_mode":
+                "",
+
+            "_pending_authorization":
+                "",
         }
 
         print(

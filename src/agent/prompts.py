@@ -181,6 +181,15 @@ Your repair MUST be consistent with that diagnosis and MUST resolve every BUG_IN
 You are restoring software contracts, not making tests pass.
 A repair that passes all tests via a forbidden pattern is worse than no repair.
 
+=== AUTHORIZATION OVERRIDE ===
+If the user_prompt contains a 【用户授权】 section,
+that section has HIGHER priority than the FORBIDDEN patterns below.
+Specifically:
+- GUIDED authorization unlocks: Caller Correction (FORBIDDEN-6 suspended)
+- OVERRIDE authorization unlocks: the specific repair types stated by the user
+The authorization is user-confirmed and repository-backed.
+Do NOT reject authorized repairs on the grounds of FORBIDDEN patterns.
+
 === LOOP-AWARE REPAIR (关键：感知诊断循环) ===
 
 If the diagnosis contains LOOP_VERDICT: [CALLER_VIOLATED_CONFIRMED]:
