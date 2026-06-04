@@ -398,7 +398,117 @@ class ProjectScanner:
     def get_import_graph(self):
 
         return self.import_graph
+    
+def scan_in_memory(repo_files: dict):
+        """
+        接收内存中的源码快照字典 {rel_path: source_code_string}
+        返回与 ProjectScanner 格式完全一致的 (export_table, call_graph, import_graph)
+        """
+        export_table = {}
 
+        for rel_path, source in repo_files.items():
+            # 保持与原有 ProjectScanner 相同的过滤策略（只处理 .py 且跳过 __init__.py）
+            if not rel_path.endswith(".py") or rel_path.endswith("__init__.py"):
+                continue
+
+            result = {
+                "classes": [],
+                "functions": [],
+                "imports": [],
+                "exports": [],
+                "calls": []
+            }
+            try:
+                # 直接从内存字符串编译 AST 树
+                tree = ast.parse(source)
+
+                # 解析 Classes
+                result["classes"] = [
+                    node.name for node in tree.body
+                    if isinstance(node, ast.ClassDef)
+                ]
+
+                # 解析 Functions
+                result["functions"] = [
+                    node.name for node in tree.body
+                    if isinstance(node, ast.FunctionDef)
+                ]
+
+                # 解析 Imports
+                imports = []
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            imports.append({
+                                "type": "import",
+                                "module": alias.name,
+                                "symbol": None
+                            })
+                    elif isinstance(node, ast.ImportFrom):
+                        module = node.module or ""
+                        for alias in node.names:
+                            imports.append({
+                                "type": "from",
+                                "module": module,
+                                "symbol": alias.name
+                            })
+                result["imports"] = imports
+
+                # 解析 Calls
+                calls = []
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    func_name = None
+                    if isinstance(node.func, ast.Name):
+                        func_name = node.func.id
+                    elif isinstance(node.func, ast.Attribute):
+                        func_name = node.func.attr
+                    if func_name:
+                        calls.append(func_name)
+                result["calls"] = list(set(calls))
+
+                # 组装 Exports
+                exports = []
+                exports.extend(result["classes"])
+                exports.extend(result["functions"])
+                result["exports"] = exports
+
+                export_table[rel_path] = result
+            except Exception:
+                # 容错：若某文件存在语法错误，跳过该文件的图谱更新
+                continue
+
+        # ==================================
+        # 构建最新的依赖拓扑图谱（数据结构与初版完美对齐）
+        # ==================================
+        # 1. 重新构建 import_graph
+        import_graph = {}
+        for file_path, info in export_table.items():
+            file_imports = []
+            for imp in info["imports"]:
+                module = imp["module"]
+                if module:
+                    file_imports.append(module)
+            import_graph[file_path] = list(set(file_imports))
+
+        # 2. 重新构建 call_graph
+        call_graph = {}
+        all_exports = {}
+        for file_path, info in export_table.items():
+            for symbol in info["exports"]:
+                all_exports[symbol] = file_path
+
+        for file_path, info in export_table.items():
+            called_files = []
+            for call_name in info["calls"]:
+                if call_name in all_exports:
+                    target_file = all_exports[call_name]
+                    if target_file != file_path:
+                        called_files.append(target_file)
+            call_graph[file_path] = list(set(called_files))
+
+        return export_table, call_graph, import_graph
 
 if __name__ == "__main__":
 
@@ -427,3 +537,4 @@ if __name__ == "__main__":
     pprint(
         scanner.get_call_graph()
     )
+

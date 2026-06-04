@@ -24,6 +24,7 @@ from src.tools.executor import CodeExecutor
 from src.tools.ast_resolver import (
     expand_target_files
 )
+from src.tools.scanner import scan_in_memory
 
 # 初始化环境变量
 ROOT_DIR = os.path.dirname(
@@ -263,10 +264,24 @@ def diagnose_node(state: AgentState):
             for path, code in state["repo_files"].items()
         ]
     )
-    
-    # --------------------------------------------------------
-    # 1. 顶层提取 AST 图谱数据与符号索引
-    # --------------------------------------------------------
+# ----------------------------------------------------------------------
+    # 【核心拦截器】：若不是首轮，强制基于大模型修改后的 state["repo_files"] 重新编译 AST
+    # ----------------------------------------------------------------------
+    if state.get("repair_attempts", 0) > 0:
+        print("🔄 [AST] 检测到上一轮修复已变更源码，正在纯内存动态重新扫描依赖拓扑...")
+        
+        # 消费内存中的最新代码快照，计算新图谱
+        new_export, new_call, new_import = scan_in_memory(state["repo_files"])
+        
+        # 覆盖写回当前图状态机，彻底清除认知盲区
+        state["export_table"] = new_export
+        state["call_graph"] = new_call
+        state["import_graph"] = new_import
+        print("✅ [AST] 依赖图谱与导出表内存对齐完毕。")
+
+    # ======================================================================
+    # 随后的索引提取函数将完美继承第二轮/最新轮次的最新数据！
+    # ======================================================================
     _current_export_table = state.get("export_table", {})
     _current_call_graph = state.get("call_graph", {})
     _current_import_graph = state.get("import_graph", {})
