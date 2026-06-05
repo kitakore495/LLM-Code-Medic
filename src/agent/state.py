@@ -65,3 +65,5 @@ class AgentState(TypedDict):
     final_patch: str
 
     modified_files: List[str]
+
+    last_patch_files: List[str]
