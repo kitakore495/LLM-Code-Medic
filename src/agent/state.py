@@ -54,3 +54,14 @@ class AgentState(TypedDict):
     export_table: Dict
     call_graph: Dict
     import_graph: Dict
+
+    repair_history: List[str]
+    report_path: str
+
+    root_cause_class: str
+
+    bug_inventory: str
+
+    final_patch: str
+
+    modified_files: List[str]

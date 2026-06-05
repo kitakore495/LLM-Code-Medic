@@ -5,7 +5,7 @@ def run_pipeline():
     print("🚀 启动自动化数据处理流水线...")
     
     input_data = 100
-    current_weight = 11  # 根据用户授权修改为11以避免违反callee契约
+    current_weight = 11  # 修正为满足weight>10的契约
     
     print("[Main] 正在调用底层工具链...")
     result = utils.execute_computation(input_data, current_weight)

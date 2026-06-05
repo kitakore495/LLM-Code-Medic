@@ -25,6 +25,7 @@ from src.tools.ast_resolver import (
     expand_target_files
 )
 from src.tools.scanner import scan_in_memory
+from langchain_core.messages import SystemMessage, HumanMessage
 
 # 初始化环境变量
 ROOT_DIR = os.path.dirname(
@@ -32,6 +33,13 @@ ROOT_DIR = os.path.dirname(
 )
 ENV_PATH = os.path.join(ROOT_DIR, ".env")
 load_dotenv(dotenv_path=ENV_PATH, override=True)
+
+MAX_REPAIR_ATTEMPTS = int(
+    os.getenv(
+        "MAX_REPAIR_ATTEMPTS",
+        "5"
+    )
+)
 
 
 def parse_patch_response(raw_text: str):
@@ -247,9 +255,6 @@ def build_gate_constraints(
     return "\n".join(rules) if rules else "N/A"
 
 
-import json
-import re
-from langchain_core.messages import SystemMessage, HumanMessage
 
 def diagnose_node(state: AgentState):
     print(f"\n🚀 [Diagnose] 第 {state.get('repair_attempts', 0) + 1} 轮诊断...")
@@ -411,6 +416,43 @@ Caller correction 只有在 ROOT_CAUSE_CLASS == [CALLER_VIOLATED] 且修正值�
         temperature=0.1,
     )
     analysis = response.content
+    # ==========================================
+    # ROOT_CAUSE_CLASS 提取
+    # ==========================================
+
+    root_cause_class = ""
+
+    m = re.search(
+        r"ROOT_CAUSE_CLASS\s*:\s*(.+)",
+        analysis,
+        re.IGNORECASE
+    )
+
+    if m:
+
+        root_cause_class = (
+            m.group(1)
+            .strip()
+        )
+
+    # ==========================================
+    # BUG_INVENTORY 提取
+    # ==========================================
+
+    bug_inventory = ""
+
+    m = re.search(
+        r"BUG_INVENTORY(.*?)(?:TARGET_FILES|$)",
+        analysis,
+        re.DOTALL | re.IGNORECASE
+    )
+
+    if m:
+
+        bug_inventory = (
+            m.group(1)
+            .strip()
+        )
 
     target_files = []
     files_match = re.search(
@@ -456,8 +498,18 @@ Caller correction 只有在 ROOT_CAUSE_CLASS == [CALLER_VIOLATED] 且修正值�
     
     return {
         **state,
-        "analysis": analysis,
-        "target_files": target_files
+
+        "analysis":
+            analysis,
+
+        "target_files":
+            target_files,
+
+        "root_cause_class":
+            root_cause_class,
+
+        "bug_inventory":
+            bug_inventory,
     }
 
 def repair_node(state: AgentState):
@@ -566,12 +618,37 @@ attempt={state.get('repair_attempts', 0)}
 
     return {
         **state,
-        "repo_files": merged_repo_files,
-        "repaired_repo_files": merged_repo_files,
-        "repair_history": history,
-        "repair_attempts": state.get("repair_attempts", 0) + 1,
-    }
 
+        "repo_files":
+            merged_repo_files,
+
+        "repaired_repo_files":
+            merged_repo_files,
+
+        "repair_history":
+            history,
+
+        "last_patch_files": 
+            list(updates.keys()),
+
+        "repair_attempts":
+            state.get(
+                "repair_attempts",
+                0
+            ) + 1,
+
+        # =========================
+        # ReportGenerator 使用
+        # =========================
+
+        "final_patch":
+            raw_patch,
+
+        "modified_files":
+            list(
+                updates.keys()
+            ),
+    }
 
 def repairability_gate_node(state: AgentState):
     print("""
@@ -728,33 +805,34 @@ STDERR: {getattr(res,'stderr','')}"""
 
 
 def patch_quality_gate_node(state: AgentState):
-    print("""
-🧪 [Patch Quality Gate] 正在检查补丁质量...""")
+    print("\n🧪 [Patch Quality Gate] 正在检查补丁质量...")
+ 
     gate = PatchQualityGate()
+ 
     passed, reason = gate.check(
         analysis=state.get("analysis", ""),
         original_files=state.get("original_repo_files", {}),
         repaired_files=state.get("repo_files", {}),
         target_files=state.get("target_files", []),
+        last_patch_files=state.get("last_patch_files"),  # 本轮实际 patch 文件列表
     )
-
+ 
     history = list(state.get("repair_history", []))
     if not passed:
         print(f"❌ [Patch Quality Gate] 检查失败: {reason}")
         history.append(
-            f"""[Patch Gate Failure]
-reason={reason}
-repair_attempts={state.get('repair_attempts', 0)}"""
+            f"[Patch Gate Failure]\nreason={reason}\nrepair_attempts={state.get('repair_attempts', 0)}"
         )
     else:
         print("✅ [Patch Quality Gate] 检查通过")
-
+ 
     return {
         **state,
         "patch_quality_passed": passed,
         "patch_quality_reason": reason,
         "repair_history": history,
     }
+ 
 
 
 def policy_gate_node(state: AgentState):
@@ -796,8 +874,8 @@ def should_continue_after_patch_gate(state: AgentState):
     if state.get("patch_quality_passed", False):
         print("✅ [Gate] Patch Quality 通过")
         return "semantic_patch_gate"
-    if state.get("repair_attempts", 0) >= 5:
-        print("💀 Patch Gate 超过最大修复次数")
+    if state.get("repair_attempts", 0) >= MAX_REPAIR_ATTEMPTS:
+        print("💀 Patch Gate 超过最大修复次数({MAX_REPAIR_ATTEMPTS}")
         return END
     return "repair"
 
@@ -806,8 +884,8 @@ def should_continue_after_semantic_gate(state: AgentState):
     if state.get("semantic_gate_passed", False):
         print("✅ [Gate] Semantic Patch 通过")
         return "policy_gate"
-    if state.get("repair_attempts", 0) >= 5:
-        print("💀 Semantic Gate 超过最大修复次数")
+    if state.get("repair_attempts", 0) >= MAX_REPAIR_ATTEMPTS:
+        print(f"💀 Semantic Gate 超过最大修复次数({MAX_REPAIR_ATTEMPTS})")
         return END
     return "repair"
 
@@ -832,9 +910,9 @@ def should_continue_after_policy_gate(state: AgentState):
 
 
 def should_continue_after_repairability(state: AgentState):
-    if state.get("repair_attempts", 0) >= 5:
-        print("""
-💀 [Routing] 达到最大修复轮次 (5次)，强制终止""")
+    if state.get("repair_attempts", 0) >= MAX_REPAIR_ATTEMPTS:
+        print(f"""
+💀 [Routing] 达到最大修复轮次 ({MAX_REPAIR_ATTEMPTS}次)，强制终止""")
         return "stop"
  
     repair_status = state.get("repair_status", "REPAIRABLE")

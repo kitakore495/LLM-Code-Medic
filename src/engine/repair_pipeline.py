@@ -14,6 +14,9 @@ from src.plugins.plugin_manager import (
     PluginManager
 )
 
+from src.report.report_generator import (
+    ReportGenerator
+)
 
 class RepairPipeline:
 
@@ -31,6 +34,13 @@ class RepairPipeline:
         # =====================================================
         self.plugin_manager = (
             PluginManager()
+        )
+
+        # =====================================================
+        # Report Generator
+        # =====================================================
+        self.report_generator = (
+            ReportGenerator()
         )
 
     # =========================================================
@@ -206,7 +216,11 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
 
             "analysis":
                 "",
+            "repair_history":
+                [],
 
+            "report_path":
+                "",
             # ── 沙箱与验证 ────────────────────────────────────
             "sandbox_stdout":
                 "",
@@ -281,6 +295,21 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
 
             "import_graph":
                 import_graph,
+
+            "root_cause_class":
+                "",
+
+            "bug_inventory":
+                "",
+
+            "final_patch":
+                "",
+
+            "modified_files":
+                [],
+
+            "last_patch_files":
+                [],
         }
 
         print(
@@ -394,3 +423,25 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
         print(
             "=================================================="
         )
+
+        # =====================================================
+        # Generate Final Report
+        # =====================================================
+
+        try:
+
+            report = (
+                self.report_generator.generate(
+                    final_state
+                )
+            )
+
+            self.report_generator.save(
+                report
+            )
+
+        except Exception as e:
+
+            print(
+                f"\n⚠️ 报告生成失败: {e}"
+            )
