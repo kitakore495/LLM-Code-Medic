@@ -42,26 +42,38 @@ MAX_REPAIR_ATTEMPTS = int(
 )
 
 
-def parse_patch_response(raw_text: str):
+def parse_patch_response(raw_text: str, existing_keys: list = None):
     repo_updates = {}
     pattern = re.compile(
         r"<<<FILE_PATH:\s*(.*?)>>>(.*?)<<<FILE_END>>>", re.DOTALL
     )
     matches = pattern.findall(raw_text)
-    print(f"""
-📝 已解析补丁块数量: {len(matches)}""")
+    print(f"\n📝 已解析补丁块数量: {len(matches)}")
 
     for relative_path, code in matches:
         relative_path = relative_path.strip().replace("\\", "/")
         relative_path = re.sub(r"^(tests/[^/]+/|v\d+/)", "", relative_path)
+
+        # 如果解析出的路径在已有 key 里找不到，用文件名做唯一匹配
+        if existing_keys and relative_path not in existing_keys:
+            filename = relative_path.split("/")[-1]
+            matched = [
+                k for k in existing_keys
+                if k == filename or k.endswith("/" + filename)
+            ]
+            if len(matched) == 1:
+                # 唯一匹配：用原始带路径的 key 替换扁平名
+                relative_path = matched[0]
+            elif len(matched) > 1:
+                # 多个文件同名，无法唯一确定，打印警告保留原值
+                print(f"    ⚠️ 路径歧义: '{relative_path}' 匹配到多个文件 {matched}，保留原路径")
+
         repo_updates[relative_path] = code.strip()
-        print(f"""    -> 已更新: {relative_path} ({len(code)} bytes)""")
+        print(f"    -> 已更新: {relative_path} ({len(code)} bytes)")
 
     return repo_updates
 
 def build_ast_context(state):
-
-    import json
 
     export_table = state.get(
         "export_table",
@@ -115,19 +127,17 @@ def build_symbol_index(state):
 
     index = {}
 
-    for (
-        file_path,
-        info
-    ) in export_table.items():
+    for file_path, info in export_table.items():
 
         for symbol in info.get(
             "exports",
             []
         ):
 
-            index[
-                symbol
-            ] = file_path
+            index.setdefault(
+                symbol,
+                []
+            ).append(file_path)
 
     return index
 
@@ -142,11 +152,12 @@ def resolve_symbol(
         )
     )
 
-    if symbol_name in symbol_index:
+    hits = symbol_index.get(
+        symbol_name
+    )
 
-        return symbol_index[
-            symbol_name
-        ]
+    if hits:
+        return hits[0]
 
     symbol_lower = (
         symbol_name.lower()
@@ -154,7 +165,7 @@ def resolve_symbol(
 
     for (
         symbol,
-        file_path
+        file_paths
     ) in symbol_index.items():
 
         if (
@@ -162,11 +173,11 @@ def resolve_symbol(
             == symbol_lower
         ):
 
-            return file_path
+            return file_paths[0]
 
     for (
         symbol,
-        file_path
+        file_paths
     ) in symbol_index.items():
 
         if (
@@ -174,7 +185,7 @@ def resolve_symbol(
             in symbol.lower()
         ):
 
-            return file_path
+            return file_paths[0]
 
     return None
 
@@ -274,22 +285,17 @@ def diagnose_node(state: AgentState):
     # ----------------------------------------------------------------------
     if state.get("repair_attempts", 0) > 0:
         print("🔄 [AST] 检测到上一轮修复已变更源码，正在纯内存动态重新扫描依赖拓扑...")
-        
-        # 消费内存中的最新代码快照，计算新图谱
         new_export, new_call, new_import = scan_in_memory(state["repo_files"])
-        
-        # 覆盖写回当前图状态机，彻底清除认知盲区
-        state["export_table"] = new_export
-        state["call_graph"] = new_call
-        state["import_graph"] = new_import
+        # 不直接赋值给 state，改用局部变量，后面统一写进 return
+        _current_export_table = new_export
+        _current_call_graph   = new_call
+        _current_import_graph = new_import
         print("✅ [AST] 依赖图谱与导出表内存对齐完毕。")
-
-    # ======================================================================
-    # 随后的索引提取函数将完美继承第二轮/最新轮次的最新数据！
-    # ======================================================================
-    _current_export_table = state.get("export_table", {})
-    _current_call_graph = state.get("call_graph", {})
-    _current_import_graph = state.get("import_graph", {})
+    else:
+        _current_export_table = state.get("export_table", {})
+        _current_call_graph   = state.get("call_graph", {})
+        _current_import_graph = state.get("import_graph", {})
+ 
     
     _current_symbol_index = build_symbol_index(state)
     ast_context = build_ast_context(state)
@@ -297,17 +303,10 @@ def diagnose_node(state: AgentState):
     # --------------------------------------------------------
     # 2. 规范化调试打印输出
     # --------------------------------------------------------
-    print("\n📊 ExportTable:")
-    print(len(_current_export_table))
-
-    print("📊 SymbolIndex:")
-    print(len(_current_symbol_index))
-
-    print("📊 CallGraph:")
-    print(len(_current_call_graph))
-
-    print("📊 ImportGraph:")
-    print(len(_current_import_graph))
+    print(f"📊 ExportTable: {len(_current_export_table)}")
+    print(f"📊 SymbolIndex: {len(_current_symbol_index)}")
+    print(f"📊 CallGraph edges: {sum(len(v) for v in _current_call_graph.values())}")
+    print(f"📊 ImportGraph edges: {sum(len(v) for v in _current_import_graph.values())}")
 
     repair_history_text = "\n\n".join(state.get("repair_history", []))
     repair_attempts = state.get("repair_attempts", 0)
@@ -325,7 +324,21 @@ LOOP_CHECK_1: stderr 与上一轮是否为同类异常？
 LOOP_CHECK_2: 上一轮是否只修改了 callee 文件？
 LOOP_CHECK_3: callee 是否已包含 raise？
 如果三项均为 YES：ROOT_CAUSE_CLASS 必须重新判定为 [CALLER_VIOLATED]，且 TARGET_FILES 必须包含 caller 文件。禁止继续只修改 callee。"""
-
+    has_subdirs = any("/" in path for path in state["repo_files"].keys())
+    
+    if has_subdirs:
+        sandbox_layout_hint = """
+    沙箱保留完整目录结构，import 语句必须使用与仓库一致的包路径。
+    正确：from config.settings import TAX_RATE
+    正确：from services.order_service import submit_order
+    错误：from settings import TAX_RATE  （丢失了包路径）
+    禁止将带目录层级的 import 改为扁平 import。"""
+    else:
+        sandbox_layout_hint = """
+    所有源码文件在沙箱执行时写入同一执行目录（扁平布局）。
+    import 只能使用模块名本身（= 文件名去掉 .py），不允许含目录层级。
+    正确：from validator import validate_dataset
+    错误：from some.nested.path.validator import validate_dataset"""
     # --------------------------------------------------------
     # 3. 干净装配的组装 Prompt（移除了冗余的旧 Dump）
     # --------------------------------------------------------
@@ -382,10 +395,7 @@ LOOP_CHECK_3: callee 是否已包含 raise？
 ========================
 【沙箱执行约定 — Import 路径规则】
 ========================
-所有源码文件在沙箱执行时写入同一执行目录（扁平布局）。
-import 只能使用模块名本身（= 文件名去掉 .py），不允许含目录层级。
-正确：from validator import validate_dataset
-错误：from some.nested.path.validator import validate_dataset
+{sandbox_layout_hint}
 
 ========================
 【BUG_INVENTORY 强制扫描约束】
@@ -498,18 +508,13 @@ Caller correction 只有在 ROOT_CAUSE_CLASS == [CALLER_VIOLATED] 且修正值�
     
     return {
         **state,
-
-        "analysis":
-            analysis,
-
-        "target_files":
-            target_files,
-
-        "root_cause_class":
-            root_cause_class,
-
-        "bug_inventory":
-            bug_inventory,
+        "analysis":           analysis,
+        "target_files":       target_files,
+        "root_cause_class":   root_cause_class,
+        "bug_inventory":      bug_inventory,
+        "export_table":       _current_export_table,   # ← 新增
+        "call_graph":         _current_call_graph,      # ← 新增
+        "import_graph":       _current_import_graph,    # ← 新增
     }
 
 def repair_node(state: AgentState):
@@ -525,6 +530,7 @@ def repair_node(state: AgentState):
             for path, code in state["repo_files"].items()
         ]
     )
+    ast_context = build_ast_context(state)
     editable_targets = state.get("target_files", [])
     repair_history_text = "\n\n".join(state.get("repair_history", []))
     gate_constraints = build_gate_constraints(
@@ -537,12 +543,28 @@ def repair_node(state: AgentState):
 
     authorization_context = build_authorization_context(state)
 
+    has_subdirs = any("/" in path for path in state["repo_files"].keys())
+ 
+    if has_subdirs:
+        sandbox_layout_hint = """沙箱保留完整目录结构，import 必须使用包路径。
+    正确：from config.settings import TAX_RATE
+    错误：from settings import TAX_RATE"""
+    else:
+        sandbox_layout_hint = """沙箱为扁平布局，import 只能使用模块名本身（文件名去掉 .py）。
+    正确：from validator import validate_dataset
+    错误：from utils.validator import validate_dataset"""
+
     user_prompt = f"""请修复当前项目。
 
 ========================
 【根因分析（含 BUG_INVENTORY）】
 ========================
 {state.get('analysis', '未提供根因分析')}
+
+========================
+【AST工程索引】
+========================
+{ast_context}
 
 ========================
 【完整项目源码（只读参考）】
@@ -584,6 +606,11 @@ def repair_node(state: AgentState):
 4. 无合法方案时：ESCALATE_REQUIRED: reason
 
 ========================
+【沙箱执行约定】
+========================
+{sandbox_layout_hint}
+
+========================
 【🛡️ 动态门禁强制约束】
 ========================
 {gate_constraints}
@@ -612,7 +639,7 @@ attempt={state.get('repair_attempts', 0)}
 {raw_patch}"""
     )
 
-    updates = parse_patch_response(raw_patch)
+    updates = parse_patch_response(raw_patch, existing_keys=list(state["repo_files"].keys()))
     merged_repo_files = dict(state["repo_files"])
     merged_repo_files.update(updates)
 
@@ -729,6 +756,7 @@ def semantic_patch_gate_node(state: AgentState):
         analysis=state.get("analysis", ""),
         target_files=state.get("target_files", []),
         sandbox_stderr=state.get("sandbox_stderr", ""),
+        bug_inventory=state.get("bug_inventory", ""),
     )
 
     history = list(state.get("repair_history", []))

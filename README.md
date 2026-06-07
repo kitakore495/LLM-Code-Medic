@@ -20,45 +20,45 @@
 ```text
 LLM-Code-Medic/
 │
-├── src/                              # 📦 系统核心源码容器
-│   ├── main.py   	                 # 🚀 系统的全局启动入口（引导实例化 MedicEngine）
-│   ├── config/                       # ⚙️ 全局动态配置解析域
-│   │   └── runtime_config.py         # 统一环境类型转换与安全模式判别
+├── 📁 src/                             # 系统核心源代码根目录
+│   ├── 📄 main.py                      # 系统全局启动入口（负责初始化并调度 MedicEngine）
+│   ├── 📁 config/                      # 全局配置与环境解析模块
+│   │   └── ⚙️ runtime_config.py        # 运行时配置解析器（环境变量类型转换与安全模式校验）
 │   │
-│   ├── engine/                       # 🚂 核心编排与会话流控引擎 (The Core Orchestration Engine)
-│   │   ├── medic_engine.py           # 守护流主中枢，封装冷启动与执行挂起
-│   │   ├── repair_pipeline.py        # 贯穿全生命周期的管道，协调雷达测绘、状态机执行与后置单测生成
-│   │   └── runtime_session.py        # 运行时会话单例，动态热构建并组装底层 LLM Client
+│   ├── 📁 engine/                      # 🚂 核心业务逻辑编排与会话流控引擎
+│   │   ├── ⚙️ medic_engine.py          # 核心守护进程（封装系统初始化、冷启动与执行挂起逻辑）
+│   │   ├── ⛓️ repair_pipeline.py       # 修复流水线管理器（组织依赖拓扑扫描、状态机流转与后置质量治理）
+│   │   └── 🌐 runtime_session.py       # 运行时会话上下文管理（单例模式管理 LLM 客户端）
 │   │
-│   ├── agent/                        # 🧠 状态机感知网络与契约定义
-│   │   ├── state.py                  # 承载工程全景、报错及 Patch 内存的全局数据总线 (TypedDict)
-│   │   ├── graph.py                  # LangGraph 拓扑网格，编排多门禁与自愈闭环控制流
-│   │   └── prompts.py                # 核心契约：内嵌 PHASE 0-4 强流控审计与 Q1-Q10 自查自省问卷提示词
+│   ├── 📁 agent/                       # 🧠 认知智能体感知层与契约规约定义
+│   │   ├── 📊 state.py                 # 全局状态总线（承载全景依赖、异常堆栈与补丁快照）
+│   │   ├── 🕸️ graph.py                 # 基于 LangGraph 的有向图状态机（编排节点流转与自愈闭环）
+│   │   └── 📜 prompts.py               # 系统级认知协议规约（内置 PHASE 与 Q&A 自查问卷）
 │   │
-│   ├── llm/                          # 🌐 高级大模型路由与指数退避容灾层
-│   │   ├── model_factory.py          # 动态多平台模型实力化解耦工厂 (ChatOpenAI / Gemini)
-│   │   ├── provider_router.py        # 维护双 LLM 角色对齐，捕获运行时降级拓扑
-│   │   └── llm_invoker.py            # 封装带指数退避重试 (Backoff) 的弹性接口调用原子
+│   ├── 📁 llm/                         # 🌐 模型访问抽象层与弹性容灾适配层
+│   │   ├── 🏭 model_factory.py         # 模型解耦实例化工厂（适配多供应商 API 规范）
+│   │   ├── 🧭 provider_router.py       # 双 LLM 认知角色静态路由与运行时降级拓扑管理器
+│   │   └── 🔌 llm_invoker.py           # 弹性接口调用原子（集成指数退避重试机制）
 │   │
-│   ├── quality/                      # 🛡️ 门禁矩阵（Multi-Gate Matrix - 幻觉拦截阻断器）
-│   │   ├── patch_quality_gate.py     # 补丁物理完备性校验，拦截结构破碎的残缺块
-│   │   ├── semantic_patch_gate.py    # AST 级语义大审判（防吞异常、防公式微调、防签名漂移）
-│   │   ├── policy_gate.py            # 全局策略常量保护网关，通过赋值语句流跟踪拦截硬编码字面量
-│   │   └── repairability_gate.py     # 判定修复收敛状态，并在死锁时触发人工授权窗口(Guided/Override)
+│   ├── 📁 quality/                     # 🛡️ 静态代码语义与策略门禁矩阵
+│   │   ├── 📦 patch_quality_gate.py    # 补丁物理完备性验证器（检查补丁块的物理闭合性）
+│   │   ├── 🧠 semantic_patch_gate.py   # AST 语义变动审查器（拦截异常吞噬、算法篡改与签名漂移）
+│   │   ├── 🔒 policy_gate.py           # 安全策略常量保护网关（分析赋值语句流，拦截越权硬编码）
+│   │   └── 🔁 repairability_gate.py    # 可修复性评估组件（收敛性检测与人工授权管道）
 │   │
-│   ├── tools/                        # 📡 静态分析测绘雷达与影子沙箱空间
-│   │   ├── scanner.py                #  深度物理扫描计算 ExportTable / CallGraph / ImportGraph
-│   │   ├── ast_resolver.py           #  依据图谱对大模型认定的目标文件范围执行上下游传递闭包扩展
-│   │   └── executor.py               #  动态构建影子工作区，执行 pycache 清洗并实施隔离原子验证
+│   ├── 📁 tools/                       # 📡 静态分析工具集与沙箱运行时环境
+│   │   ├── 🔍 scanner.py               # 项目静态扫描器（测绘 ExportTable、CallGraph 与 ImportGraph）
+│   │   ├── 📐 ast_resolver.py          # 符号依赖解析器（执行上下游传递闭包扩展）
+│   │   └── 🧪 executor.py              # 影子隔离沙箱执行器（组装虚拟工作区，执行原子化验证）
 │   │
-│   ├── plugins/                      # 🧩 后置模块治理插件总线
+│   ├── 🧩 plugins/                     # 🧩 后置代码治理插件总线（涵盖风格、安全、单测补全）
 │   │
-│   └── report/                       
-│       └── report_generator.py       #  📊 交付级度量报告生成
+│   └── 📊 report/                      # 📈 自动化交付物度量与报告域
+│       └── 📄 report_generator.py      # 度量报告生成器（汇聚诊断度量与拦截记录，持久化 Markdown）
 │
-├── output/                           # 🧪 Shadow Workspace 沙箱原子执行物理工作区
+├── 🧪 output/                          # 🧪 Shadow Workspace 影子隔离沙箱物理执行区
 │
-└── tests/                            # 🎯 多文件漏洞工程评估基准库 (Benchmarks)
+└── 🎯 tests/                           # 🎯 多文件复杂漏洞工程评估基准库 (Benchmarks)
 
 ```
 

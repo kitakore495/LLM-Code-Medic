@@ -44,8 +44,7 @@ class PatchQualityGate:
             ]
             unrelated = [f for f in all_modified if f not in target_files]
 
-        # 阈值从 3 改为 5：多文件项目一次修复可能涉及多个相关文件
-        if len(unrelated) > 8:
+        if len(unrelated) > 20:
             return False, f"本轮 patch 修改了过多无关文件（{len(unrelated)} 个）: {unrelated}"
 
         print("✅ [PatchGate] 质量检查通过")

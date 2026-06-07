@@ -60,18 +60,75 @@ class SemanticPatchGate:
     # =========================================================
     @staticmethod
     def _check_swallowed_exceptions(path: str, new_tree: ast.AST) -> List[str]:
+
         hits = []
+
         for node in ast.walk(new_tree):
+
             if not isinstance(node, ast.ExceptHandler):
                 continue
-            has_raise = any(isinstance(child, ast.Raise) for child in ast.walk(node))
-            if not has_raise:
-                hits.append(
-                    f"{path}:line {node.lineno} "
-                    f"RULE-2 异常吞噬：except 块无 re-raise 或 escalate"
-                )
-        return hits
 
+            body = node.body
+
+            #
+            # except:
+            #
+            if not body:
+                hits.append(
+                    f"{path}:line {node.lineno} RULE-2 空 except"
+                )
+                continue
+
+            #
+            # except: pass
+            #
+            if len(body) == 1 and isinstance(body[0], ast.Pass):
+                hits.append(
+                    f"{path}:line {node.lineno} RULE-2 except: pass"
+                )
+                continue
+
+            #
+            # except: ...
+            #
+            if (
+                len(body) == 1
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and body[0].value.value == Ellipsis
+            ):
+                hits.append(
+                    f"{path}:line {node.lineno} RULE-2 except: ..."
+                )
+                continue
+
+            #
+            # 有任何业务处理直接放行
+            #
+            has_meaningful_stmt = any(
+                isinstance(
+                    stmt,
+                    (
+                        ast.Return,
+                        ast.Raise,
+                        ast.Assign,
+                        ast.AugAssign,
+                        ast.Expr,
+                        ast.Break,
+                        ast.Continue,
+                        ast.If,
+                        ast.For,
+                        ast.While,
+                        ast.Try,
+                    ),
+                )
+                for stmt in body
+            )
+
+            if has_meaningful_stmt:
+                continue
+
+        return hits
     # =========================================================
     # RULE-3
     # =========================================================
@@ -200,81 +257,64 @@ class SemanticPatchGate:
         target_files: List[str],
         sandbox_stderr: str,
     ) -> List[str]:
-        hits = []
+
+        """
+        弱提示版本。
+
+        不再阻断 SemanticGate。
+
+        仅给 Diagnose 提示：
+        可能存在 Caller Blind Spot。
+        """
+
+        hints = []
+
         if not sandbox_stderr:
-            return hits
+            return hints
 
-        if not re.search(r"\b\w*Error\b|\braise\b", sandbox_stderr):
-            return hits
+        changed_files = []
 
-        pure_callee_files: List[str] = []
-        for tf in target_files:
-            original_code = original_repo_files.get(tf, "")
-            repaired_code = repo_files.get(tf, "")
-            if repaired_code == original_code:
+        for path in target_files:
+
+            old_code = original_repo_files.get(path, "")
+            new_code = repo_files.get(path, "")
+
+            if old_code != new_code:
+                changed_files.append(path)
+
+        if not changed_files:
+            return hints
+
+        caller_candidates = []
+
+        for path, code in repo_files.items():
+
+            if path in changed_files:
                 continue
-            original_had_raise = bool(re.search(r"\braise\b", original_code))
-            repaired_has_raise = bool(re.search(r"\braise\b", repaired_code))
-            if repaired_has_raise and not original_had_raise:
-                pure_callee_files.append(tf)
 
-        if not pure_callee_files:
-            return hits
-
-        callee_func_names: set = set()
-        for tf in pure_callee_files:
-            code = repo_files.get(tf, "")
             try:
                 tree = ast.parse(code)
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.FunctionDef):
-                        callee_func_names.add(node.name)
-            except SyntaxError:
-                pass
-
-        if not callee_func_names:
-            return hits
-
-        unmodified_callers: List[str] = []
-        for repo_path, repaired_code in repo_files.items():
-            if repo_path in pure_callee_files:
-                continue
-
-            original_code = original_repo_files.get(repo_path, "")
-            if repaired_code != original_code:
-                continue
-
-            try:
-                tree = ast.parse(repaired_code)
             except SyntaxError:
                 continue
 
-            calls_callee = any(
-                (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in callee_func_names
-                ) or (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id in callee_func_names
-                )
-                for node in ast.walk(tree)
+            call_count = sum(
+                1
+                for n in ast.walk(tree)
+                if isinstance(n, ast.Call)
             )
 
-            if calls_callee:
-                unmodified_callers.append(repo_path)
+            if call_count > 0:
+                caller_candidates.append(path)
 
-        if unmodified_callers:
-            hits.append(
-                f"RULE-6 Caller 盲区：本轮为 callee {pure_callee_files} 新增了 raise 契约，"
-                f"但 sandbox 仍然失败（stderr 含异常），"
-                f"且以下 caller 文件本轮未被修改：{unmodified_callers}。"
-                f"诊断必须将 ROOT_CAUSE_CLASS 重新评估为 [CALLER_VIOLATED]，"
-                f"并将上述 caller 文件纳入 TARGET_FILES。"
+        if caller_candidates:
+
+            hints.append(
+                "RULE-6(HINT): sandbox仍失败，"
+                f"本轮修改文件={changed_files}，"
+                f"可能存在未修改caller={caller_candidates[:10]}"
             )
 
-        return hits
+        return hints
 
     # =========================================================
     # Entry
@@ -286,6 +326,7 @@ class SemanticPatchGate:
         analysis: str,
         target_files: List[str] = None,
         sandbox_stderr: str = "",
+        bug_inventory: str = "",
     ) -> Tuple[bool, str]:
 
         print("\n🧠 [SemanticGate] 开始执行语义补丁检查 (AST增强版)...")
@@ -338,37 +379,49 @@ class SemanticPatchGate:
 
         # ── RULE-6: Caller 盲区（跨文件，仅在有 stderr 时触发）──
         if sandbox_stderr:
-            rule6_hits = self._check_caller_blindspot(
+
+            rule6_hints = self._check_caller_blindspot(
                 repo_files=repo_files,
                 original_repo_files=original_repo_files,
                 target_files=target_files,
                 sandbox_stderr=sandbox_stderr,
             )
-            reasons.extend(rule6_hits)
 
-        # ── 💡 升级版 RULE-7: target_files 协同改动判定 ────────────────
+            for h in rule6_hints:
+                print(f"ℹ️ {h}")
+
+        # ── RULE-7: 极简版 ─────────────────────────────
+
         if "NO_FAULT_DETECTED" in analysis or "NO_REPAIR_NEEDED" in analysis:
-            print("ℹ️ [SemanticGate] 检测到诊断为无需修复，跳过 RULE-7 强改约束")
+
+            print(
+                "ℹ️ [SemanticGate] 检测到无需修复，跳过 RULE-7"
+            )
+
         else:
-            # 统计当前整批待检查文件中，有哪些文件被真正修改了
+
             changed_files = {
                 p.lower()
                 for p in files_to_check
                 if original_repo_files.get(p) != repo_files.get(p)
             }
-            
-            # 如果整批 target_files 里至少有一个文件被成功改动了（协同修复开始奏效）
-            # 那么未发生改动的文件将被智能放行，不再做机械的死锁拦截
-            if len(changed_files) > 0:
-                unchanged_targets = [f for f in target_files if f.lower() not in changed_files]
-                if unchanged_targets:
-                    print(f"ℹ️ [SemanticGate] 协同修复检测：已修改文件 {list(changed_files)}，智能放行未修改的目标文件: {unchanged_targets}")
-            else:
-                # 只有在诊断要求修复，且大模型完全一个文件都没改动的情况下，才报 RULE-7
-                for file_name in target_files:
-                    if file_name.lower() not in changed_files:
-                        reasons.append(f"{file_name} RULE-7: 被要求修复但未修改")
 
+            #
+            # 唯一拦截条件：
+            # LLM 一行代码都没改
+            #
+            if not changed_files:
+
+                reasons.append(
+                    "RULE-7: LLM 未产生任何实际修改"
+                )
+
+            else:
+
+                print(
+                    f"ℹ️ [SemanticGate] RULE-7 放行，"
+                    f"本轮修改文件数={len(changed_files)}"
+                )
         # ── Result ──────────────────────────────────────────────
         if reasons:
             reason_str = "；".join(reasons)

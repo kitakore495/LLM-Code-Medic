@@ -122,31 +122,44 @@ class ProjectScanner:
         return f" ({' | '.join(info)})" if info else ""
 
     def _build_import_graph(self):
+        # 归一化 repo_files 的 key（全小写、正斜杠）用于匹配
+        repo_file_set = set(self.export_table.keys())
+        repo_file_set_lower = {k.lower().replace("\\", "/"): k for k in repo_file_set}
+    
         graph = {}
         for file_path, info in self.export_table.items():
-            imports = list(set(
-                imp["module"]
-                for imp in info["imports"]
-                if imp["module"]
-            ))
-            graph[file_path] = imports
+            deps = []
+            for imp in info["imports"]:
+                module = imp["module"]
+                if not module:
+                    continue
+                module_path = module.replace(".", "/") + ".py"
+                module_path_norm = module_path.lower().replace("\\", "/")
+                # 精确匹配
+                if module_path in repo_file_set:
+                    deps.append(module_path)
+                # 大小写不敏感匹配（Windows 兼容）
+                elif module_path_norm in repo_file_set_lower:
+                    deps.append(repo_file_set_lower[module_path_norm])
+            graph[file_path] = sorted(set(deps))
         self.import_graph = graph
 
     def _build_call_graph(self):
-        graph = {}
-        all_exports = {}
+        symbol_map = {}
         for file_path, info in self.export_table.items():
             for symbol in info["exports"]:
-                all_exports[symbol] = file_path
+                symbol_map.setdefault(symbol, set()).add(file_path)
 
+        graph = {}
         for file_path, info in self.export_table.items():
-            called_files = list(set(
-                all_exports[call_name]
+            called_files = {
+                target_file
                 for call_name in info["calls"]
-                if call_name in all_exports
-                and all_exports[call_name] != file_path
-            ))
-            graph[file_path] = called_files
+                if call_name in symbol_map
+                for target_file in symbol_map[call_name]
+                if target_file != file_path
+            }
+            graph[file_path] = sorted(called_files)
         self.call_graph = graph
 
     def scan(self):
@@ -284,27 +297,57 @@ def scan_in_memory(repo_files: dict):
         except Exception:
             continue
 
+
     # import_graph
+
+    repo_file_set = set(
+        export_table.keys()
+    )
+
     import_graph = {}
+
     for file_path, info in export_table.items():
-        import_graph[file_path] = list(set(
-            imp["module"] for imp in info["imports"] if imp["module"]
-        ))
+
+        deps = []
+
+        for imp in info["imports"]:
+
+            module = imp["module"]
+
+            if not module:
+                continue
+
+            module_path = (
+                module.replace(".", "/")
+                + ".py"
+            )
+
+            if module_path in repo_file_set:
+
+                deps.append(
+                    module_path
+                )
+
+        import_graph[file_path] = sorted(
+            set(deps)
+        )
 
     # call_graph
-    call_graph = {}
     all_exports = {}
     for file_path, info in export_table.items():
         for symbol in info["exports"]:
-            all_exports[symbol] = file_path
+            all_exports.setdefault(symbol, set()).add(file_path)
 
+    call_graph = {}
     for file_path, info in export_table.items():
-        called_files = list(set(
-            all_exports[call_name]
+        called_files = {
+            target_file
             for call_name in info["calls"]
-            if call_name in all_exports and all_exports[call_name] != file_path
-        ))
-        call_graph[file_path] = called_files
+            if call_name in all_exports
+            for target_file in all_exports[call_name]
+            if target_file != file_path
+        }
+        call_graph[file_path] = sorted(called_files)
 
     return export_table, call_graph, import_graph
 
