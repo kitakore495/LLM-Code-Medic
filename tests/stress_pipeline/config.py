@@ -1,0 +1,2 @@
+
+REPORT_PATH = "report.txt"
