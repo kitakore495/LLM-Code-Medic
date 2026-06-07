@@ -40,36 +40,81 @@ MAX_REPAIR_ATTEMPTS = int(
         "5"
     )
 )
+DEBUG = os.getenv(
+    "DEBUG",
+    "FALSE"
+).upper() == "TRUE"
 
+def debug_print(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
 
 def parse_patch_response(raw_text: str, existing_keys: list = None):
+    import re
+
     repo_updates = {}
-    pattern = re.compile(
-        r"<<<FILE_PATH:\s*(.*?)>>>(.*?)<<<FILE_END>>>", re.DOTALL
+
+    # 找出所有 FILE_PATH 起始位置
+    path_pattern = re.compile(
+        r"<<<FILE_PATH:\s*(.*?)>>>",
+        re.DOTALL
     )
-    matches = pattern.findall(raw_text)
+
+    matches = list(path_pattern.finditer(raw_text))
+
     print(f"\n📝 已解析补丁块数量: {len(matches)}")
 
-    for relative_path, code in matches:
-        relative_path = relative_path.strip().replace("\\", "/")
-        relative_path = re.sub(r"^(tests/[^/]+/|v\d+/)", "", relative_path)
+    for i, match in enumerate(matches):
 
-        # 如果解析出的路径在已有 key 里找不到，用文件名做唯一匹配
+        relative_path = match.group(1).strip().replace("\\", "/")
+        relative_path = re.sub(
+            r"^(tests/[^/]+/|v\d+/)",
+            "",
+            relative_path
+        )
+
+        # 当前文件内容起点
+        content_start = match.end()
+
+        # 下一个 FILE_PATH 位置
+        if i + 1 < len(matches):
+            content_end = matches[i + 1].start()
+        else:
+            content_end = len(raw_text)
+
+        code = raw_text[content_start:content_end]
+
+        # 去掉 FILE_END（允许不完整）
+        code = re.sub(
+            r"<<<FILE_END>>>?",
+            "",
+            code,
+            flags=re.DOTALL
+        ).strip()
+
+        # 路径映射
         if existing_keys and relative_path not in existing_keys:
             filename = relative_path.split("/")[-1]
+
             matched = [
-                k for k in existing_keys
+                k
+                for k in existing_keys
                 if k == filename or k.endswith("/" + filename)
             ]
-            if len(matched) == 1:
-                # 唯一匹配：用原始带路径的 key 替换扁平名
-                relative_path = matched[0]
-            elif len(matched) > 1:
-                # 多个文件同名，无法唯一确定，打印警告保留原值
-                print(f"    ⚠️ 路径歧义: '{relative_path}' 匹配到多个文件 {matched}，保留原路径")
 
-        repo_updates[relative_path] = code.strip()
-        print(f"    -> 已更新: {relative_path} ({len(code)} bytes)")
+            if len(matched) == 1:
+                relative_path = matched[0]
+
+            elif len(matched) > 1:
+                print(
+                    f"    ⚠️ 路径歧义: '{relative_path}' 匹配到多个文件 {matched}，保留原路径"
+                )
+
+        repo_updates[relative_path] = code
+
+        print(
+            f"    -> 已更新: {relative_path} ({len(code)} bytes)"
+        )
 
     return repo_updates
 
@@ -627,7 +672,8 @@ def repair_node(state: AgentState):
         temperature=0.1,
     )
     raw_patch = response.content
-    print(f"""
+    debug_print(repr(raw_patch))
+    debug_print(f"""
 ================ LLM PATCH RAW ================
 {raw_patch}
 =========================================""")
@@ -683,10 +729,10 @@ def repairability_gate_node(state: AgentState):
     gate = RepairabilityGate()
     repairable, reason, options, needs_decision = gate.check(state)
  
-    print(f"[DEBUG] repair_attempts = {state.get('repair_attempts', 0)}")
-    print(f"[DEBUG] sandbox_stderr exists = {bool(state.get('sandbox_stderr'))}")
-    print(f"[DEBUG] semantic_gate_reason = {state.get('semantic_gate_reason') or 'OK'}")
-    print(f"[DEBUG] policy_gate_reason = {state.get('policy_gate_reason') or ''}")
+    debug_print(f"[DEBUG] repair_attempts = {state.get('repair_attempts', 0)}")
+    debug_print(f"[DEBUG] sandbox_stderr exists = {bool(state.get('sandbox_stderr'))}")
+    debug_print(f"[DEBUG] semantic_gate_reason = {state.get('semantic_gate_reason') or 'OK'}")
+    debug_print(f"[DEBUG] policy_gate_reason = {state.get('policy_gate_reason') or ''}")
  
     if repairable:
         print("✅ [RepairabilityGate] 当前仍可继续修复")
@@ -843,6 +889,7 @@ def patch_quality_gate_node(state: AgentState):
         repaired_files=state.get("repo_files", {}),
         target_files=state.get("target_files", []),
         last_patch_files=state.get("last_patch_files"),  # 本轮实际 patch 文件列表
+        bug_inventory=state.get("bug_inventory", ""),
     )
  
     history = list(state.get("repair_history", []))
@@ -867,7 +914,7 @@ def policy_gate_node(state: AgentState):
     print("""
 🧠 [Policy Gate] 正在检查修复策略违规...""")
     repair_mode = state.get("repair_mode", "STRICT")
-    print(f"[DEBUG] policy_gate: repair_mode={repair_mode}")
+    debug_print(f"[DEBUG] policy_gate: repair_mode={repair_mode}")
 
     ok, reason = run_policy_gate(
         state["original_repo_files"],
@@ -886,7 +933,7 @@ def policy_gate_node(state: AgentState):
 def inject_authorization_node(state: AgentState):
     mode = state.get("_pending_repair_mode", "STRICT")
     auth = state.get("_pending_authorization", "")
-    print(f"[DEBUG] inject_authorization: mode={mode}")
+    debug_print(f"[DEBUG] inject_authorization: mode={mode}")
     return {
         **state,
         "repair_mode": mode,
@@ -944,9 +991,9 @@ def should_continue_after_repairability(state: AgentState):
         return "stop"
  
     repair_status = state.get("repair_status", "REPAIRABLE")
-    print(f"""
+    debug_print(f"""
 [DEBUG] repair_status = {repair_status}""")
-    print(f"[DEBUG] repair_mode = {state.get('repair_mode', 'STRICT')}")
+    debug_print(f"[DEBUG] repair_mode = {state.get('repair_mode', 'STRICT')}")
  
     if repair_status == "TERMINATED_BY_USER":
         print("🛑 自动修复终止（用户决策）")

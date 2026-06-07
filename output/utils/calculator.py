@@ -1,4 +1,4 @@
-# 修复：apply_platform_fee 内使用 PLATFORM_FEE_RATE 替代不存在的 get_fee_rate()
+# BUG-3: get_fee_rate() 不存在，直接用 PLATFORM_FEE_RATE
 from config.settings import TAX_RATE, DISCOUNT_THRESHOLD, PLATFORM_FEE_RATE
 
 

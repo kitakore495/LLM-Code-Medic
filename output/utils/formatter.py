@@ -1,4 +1,4 @@
-# 修复：函数名拼写错误 format_curency → format_currency；内部调用同步修正
+# BUG-5: 函数名拼写错误，改为 format_currency
 from config.settings import DEFAULT_CURRENCY
 
 

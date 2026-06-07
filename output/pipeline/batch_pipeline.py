@@ -1,4 +1,4 @@
-# 修复：bulk_save_orders → 逐个调用 save_order
+# BUG-13: bulk_save_orders 不存在，改用 save_order 循环
 from repository.order_repository import save_order
 from services.pricing_service import compute_order_price
 from utils.validator import validate_order
@@ -18,8 +18,8 @@ def process_batch_orders(orders: list) -> dict:
             results["failed"].append({"order_id": order.order_id, "reason": str(e)})
 
     if valid_orders:
-        for order in valid_orders:
-            save_order(order)
+        for o in valid_orders:
+            save_order(o)
         results["success"] = [o.order_id for o in valid_orders]
         logger.info(f"Batch saved {len(valid_orders)} orders")
 

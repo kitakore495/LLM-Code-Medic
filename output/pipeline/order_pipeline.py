@@ -1,4 +1,4 @@
-# 修复：process_order → submit_order
+# BUG-11: process_order 不存在，应为 submit_order
 from services.order_service import submit_order
 from services.notification_service import notify_order_submitted
 from services.report_service import generate_user_report

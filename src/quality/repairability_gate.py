@@ -18,8 +18,9 @@ class RepairabilityGate:
         semantic_reason = (state.get("semantic_gate_reason", "") or "").lower()
         policy_reason = (state.get("policy_gate_reason", "") or "").lower()
         sandbox_stderr = (state.get("sandbox_stderr", "") or "").lower()
-        repair_history = "\n".join(state.get("repair_history", [])).upper()
+        repair_history = state.get("repair_history", [])
         repair_attempts = state.get("repair_attempts", 0)
+        bug_inventory = state.get("bug_inventory", "")
 
         print(f"[DEBUG] repair_attempts = {repair_attempts}")
         print(f"[DEBUG] sandbox_stderr exists = {bool(sandbox_stderr)}")
@@ -40,7 +41,7 @@ class RepairabilityGate:
 
         escalate_detected = (
             "ESCALATE_REQUIRED" in analysis
-            or "ESCALATE_REQUIRED" in repair_history
+            or "ESCALATE_REQUIRED" in "\n".join(repair_history)
             or "notimplementederror" in sandbox_stderr
         )
         if escalate_detected:
@@ -69,23 +70,38 @@ class RepairabilityGate:
         if caller_blindspot:
             reasons.append("检测到调用侧违规，但 caller 无法推导合法参数值")
 
-        # ── 4. Verify loop（连续两轮同类异常）───────────────────
-        if repair_attempts >= 2:
-            loop_keywords = [
-                "zerodivisionerror",
-                "valueerror",
-                "notimplementederror",
-                "importerror",
-                "typeerror",
-            ]
-            if any(k in sandbox_stderr for k in loop_keywords):
-                reasons.append("多轮验证仍为同类异常，疑似不可修复循环")
+        # ── 4. Verify loop（最近3轮同类 signature）─────────────
+        # 初始化 signature 历史
+        if "error_signature_history" not in state:
+            state["error_signature_history"] = []
+
+        current_signature = ""
+        # 尝试从 sandbox stderr 中抓取错误类型+文件
+        # 格式: TypeError@services/order_service.py
+        import re
+        stderr_lines = (state.get("sandbox_stderr", "") or "").splitlines()
+        for line in stderr_lines:
+            match = re.search(r"(attributeerror|typeerror|valueerror|importerror|zerodivisionerror|notimplementederror).*?([a-zA-Z0-9_/]+\.py)", line, re.IGNORECASE)
+            if match:
+                err_type = match.group(1).lower()
+                file_path = match.group(2).replace("\\", "/")
+                current_signature = f"{err_type}@{file_path}"
+                break
+
+        if current_signature:
+            history = state["error_signature_history"]
+            history.append(current_signature)
+            state["error_signature_history"] = history[-5:]  # 只保留最近5条
+
+            # 最近3轮是否完全相同
+            if len(history) >= 3 and all(s == current_signature for s in history[-3:]):
+                reasons.append(f"最近3轮均出现同一异常 signature: {current_signature}")
 
         # ── Final Decision ────────────────────────────────────
         if reasons:
-            return False, "；".join(reasons), [], True
+            return False, "；".join(reasons), state.get("error_signature_history", []), True
 
-        return True, "当前可继续尝试修复", [], False
+        return True, "当前可继续尝试修复", state.get("error_signature_history", []), False
 
 
 # =============================================================================
@@ -137,23 +153,12 @@ def prompt_user_authorization(
     unrepairable_reason: str,
     analysis: str,
 ) -> Tuple[bool, RepairMode, str]:
-    """
-    CLI 交互层：当 RepairabilityGate 判定不可修复时，
-    向用户展示选项并收集授权。
-
-    返回：
-      (should_continue: bool, mode: RepairMode, authorization_context: str)
-
-    VSCode 插件阶段：替换此函数为 LangGraph interrupt，
-    把 unrepairable_reason 和 analysis 序列化到前端，
-    等待用户在 VSCode panel 里填写授权信息后恢复。
-    """
+    """CLI 交互层：当 RepairabilityGate 判定不可修复时，向用户展示选项并收集授权"""
     print("\n" + "=" * 60)
     print("🛑  自动修复已终止（需人工决策）")
     print("=" * 60)
     print(f"\n终止原因：{unrepairable_reason}\n")
 
-    # 展示诊断摘要
     _print_diagnosis_summary(analysis)
 
     print("\n请选择后续操作：\n")
@@ -162,7 +167,6 @@ def prompt_user_authorization(
         print(f"      {opt['description'].splitlines()[0]}")
     print()
 
-    # 收集选择
     while True:
         try:
             choice_str = input("请输入选项编号 (1-3)：").strip()
@@ -175,15 +179,12 @@ def prompt_user_authorization(
 
     selected = _AUTHORIZATION_OPTIONS[choice - 1]
 
-    # 选择停止
     if selected["mode"] is None:
         print("\n✅ 已记录，修复流程终止。")
         return False, "STRICT", ""
 
-    # 展示详细说明
     print(f"\n{selected['description']}\n")
 
-    # 收集授权上下文
     auth_context = ""
     if selected["prompt"]:
         while True:
@@ -218,7 +219,6 @@ def _print_diagnosis_summary(analysis: str) -> None:
                 found = True
                 break
     if not found:
-        # 截取前 300 字符
         print(f"  {analysis[:300]}...")
     print("─" * 60)
 

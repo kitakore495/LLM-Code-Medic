@@ -1,4 +1,4 @@
-# 修复：find_by_id → get_product
+# BUG-6: find_by_id 不存在，改为 get_product
 from repository.product_repository import get_product, save_product, update_stock
 from utils.validator import validate_product
 from config.logger import logger

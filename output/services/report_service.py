@@ -1,4 +1,4 @@
-# 修复：import format_currency → 对应 formatter.py 中已重命名为 format_currency，此处无需改动
+# BUG-5b: import format_currency，现在 formatter.py 中函数名已修正
 import os
 from utils.formatter import format_currency, format_order_summary
 from repository.order_repository import list_orders_by_user

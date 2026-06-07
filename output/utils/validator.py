@@ -1,4 +1,4 @@
-# 修复：MAX_RETRY_COUNT → MAX_RETRIES，并在 validate_quantity 中使用
+# BUG-4: import 了不存在的 MAX_RETRY_COUNT，改为 MAX_RETRIES
 from config.settings import MAX_RETRIES
 
 

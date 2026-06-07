@@ -1,4 +1,4 @@
-# 修复：MAX_RETRY_COUNT → MAX_RETRIES
+# BUG-2: import 了不存在的 MAX_RETRY_COUNT，改为 MAX_RETRIES
 import time
 from config.settings import MAX_RETRIES
 

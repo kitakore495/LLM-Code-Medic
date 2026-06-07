@@ -1,4 +1,3 @@
-# 无需修改，保留原样（target_files 中包含此文件，但无 bug 需要修复）
 import logging
 from datetime import datetime
 

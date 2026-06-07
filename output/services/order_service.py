@@ -1,4 +1,4 @@
-# 修复：save_order(order, order.user_id) → save_order(order)
+# BUG-8: save_order(order, order.user_id) 多传了参数
 from repository.order_repository import save_order, get_order, update_order
 from services.pricing_service import compute_order_price, estimate_shipping
 from services.inventory_service import get_product_info, check_availability
@@ -17,7 +17,7 @@ def submit_order(order) -> dict:
     order.total_amount = compute_order_price(order)
     shipping = estimate_shipping(order.total_amount)
 
-    save_order(order)  # 只传 order
+    save_order(order)  # 只传一个参数
 
     logger.info(f"Order {order.order_id} submitted, total={order.total_amount:.2f}")
     return {

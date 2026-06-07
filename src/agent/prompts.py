@@ -79,6 +79,39 @@ You MUST commit to one of these two classifications:
 
 Do NOT hedge. One classification, one justification.
 
+=== PHASE 1.5: VERIFY FAILURE RECLASSIFICATION ===
+
+If sandbox_stderr is not empty:
+
+You MUST treat the sandbox traceback as a NEW bug source.
+
+For the current stderr:
+
+1. Identify the exact failing expression.
+2. Identify the value that caused the failure.
+3. Determine which function produced that value.
+4. Determine whether the producing function violated its own contract.
+
+If a function returns a value incompatible with how all callers use it:
+
+Record a BUG_INVENTORY entry.
+
+Examples:
+
+submit_order() returns None
+caller expects result["status"]
+
+→ BUG [RETURN_CONTRACT_MISMATCH: submit_order]
+
+process() returns int
+caller expects dict
+
+→ BUG [RETURN_CONTRACT_MISMATCH: process]
+
+Do NOT hide these failures via caller-side guards.
+
+The producing function becomes a candidate REPAIR_SCOPE.
+
 === PHASE 2: VERIFY-LOOP DETECTION (关键：防止诊断闭环) ===
 
 If sandbox_stderr is non-empty AND repair_attempts >= 1, you MUST answer:
@@ -246,11 +279,31 @@ If the diagnosis contains LOOP_VERDICT: [CALLER_VIOLATED_CONFIRMED]:
    Fixing only the current stderr bug while leaving other BUG_INVENTORY
    entries unresolved is a policy violation (WATERFALL_REPAIR).
 
+10. SYMPTOM MASKING
+
+A repair that only prevents an exception while preserving the same invalid state
+is FORBIDDEN.
+
+Repairs must restore the broken contract rather than suppress the symptom.
+
+Caller-side guards, defensive checks, early returns, silent fallbacks,
+or exception wrappers are not valid repairs when they leave the original
+invalid value unchanged.
+
+If a function produces a value that is incompatible with how callers use it,
+the producer function must be repaired.
+
+The source of the invalid state is the repair target.
+
+Repairs that merely avoid the crash without restoring the expected contract
+are considered policy violations.
+
 === REPAIR HIERARCHY ===
 
 Priority 1 — BUG_INVENTORY RESOLUTION
   Fix every entry listed in BUG_INVENTORY before addressing other issues.
   Each entry has a CORRECT field — use it exactly.
+  
 
 Priority 2 — LOOP RESOLUTION (if LOOP_VERDICT == [CALLER_VIOLATED_CONFIRMED])
   Fix the caller. The callee is already correct. See LOOP-AWARE REPAIR above.
@@ -301,6 +354,26 @@ Q10: Does my repair fix EVERY entry in BUG_INVENTORY? (List each entry and confi
 RESTART conditions:
 Q1=NO | Q2=YES | Q3=YES | Q4=YES | Q5=YES | Q6=NO | Q7=NO | Q8=NO | Q9=YES | Q10=NO
 
+=== PYTHON SOURCE OUTPUT CONSTRAINT ===
+
+Content inside <<<FILE_PATH>>> ... <<<FILE_END>>> MUST be valid Python source code.
+
+Do NOT insert:
+- Chinese prose
+- Explanatory text
+- Natural-language notes
+- Markdown
+- Analysis comments not already present in the original file
+
+Non-ASCII characters are forbidden unless they already existed in the original file.
+
+Before emitting each file:
+1. Ensure the file can be parsed by Python ast.parse().
+2. Ensure no full-width punctuation exists:
+   ， 。 ： ； （ ） 【 】 「 」 『 』
+3. If explanatory text is necessary, place it ONLY in SELF_VERIFICATION,
+   never inside FILE blocks.
+   
 === OUTPUT FORMAT (严格遵守) ===
 
 SELF_VERIFICATION:
