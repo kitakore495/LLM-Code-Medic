@@ -111,7 +111,8 @@ class RepairPipeline:
     # 主执行流程
     # =========================================================
     def execute(
-        self
+        self,
+        error_message: str
     ):
 
         print(
@@ -151,16 +152,6 @@ class RepairPipeline:
             self.load_repo_files()
         )
 
-        # =====================================================
-        # 初始错误
-        # =====================================================
-        INITIAL_ERROR = """
-Traceback (most recent call last):
-  File "main.py", line 11, in run_pipeline
-    result = utils.compute_core_logic(input_data)
-AttributeError: module 'utils' has no attribute 'compute_core_logic'
-""".strip()
-
         print(
             "\n🧠 当前运行配置"
         )
@@ -192,7 +183,7 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
                 project_map_context,
 
             "error_message":
-                INITIAL_ERROR,
+                error_message,
 
             # ── 文件操作相关 ──────────────────────────────────
             "target_files":
@@ -429,19 +420,10 @@ AttributeError: module 'utils' has no attribute 'compute_core_logic'
         # =====================================================
 
         try:
-
-            report = (
-                self.report_generator.generate(
-                    final_state
-                )
-            )
-
-            self.report_generator.save(
-                report
-            )
+            report = self.report_generator.generate(final_state)
+            self.report_generator.save(report)
 
         except Exception as e:
+            print(f"\n⚠️ 报告生成失败: {e}")
 
-            print(
-                f"\n⚠️ 报告生成失败: {e}"
-            )
+        return final_state

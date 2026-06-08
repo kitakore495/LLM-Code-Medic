@@ -1,6 +1,4 @@
-from src.engine.repair_pipeline import (
-    RepairPipeline
-)
+from src.engine.repair_pipeline import RepairPipeline
 
 
 class MedicEngine:
@@ -9,19 +7,16 @@ class MedicEngine:
         self,
         repo_root: str
     ):
+        self.repo_root = repo_root
 
-        self.repo_root = (
-            repo_root
-        )
-
-        self.pipeline = (
-            RepairPipeline(
-                repo_root=repo_root
-            )
+        self.pipeline = RepairPipeline(
+            repo_root=repo_root
         )
 
     def run(
-        self
+        self,
+        error_message: str
     ):
-
-        self.pipeline.execute()
+        return self.pipeline.execute(
+            error_message=error_message
+        )

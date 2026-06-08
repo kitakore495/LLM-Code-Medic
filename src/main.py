@@ -1,28 +1,23 @@
 import os
 import sys
 
-from dotenv import (
-    load_dotenv
-)
+from dotenv import load_dotenv
 
 # =========================================================
 # 全局环境变量最先加载
 # =========================================================
+
 ROOT_DIR = (
     os.path.dirname(
         os.path.dirname(
-            os.path.abspath(
-                __file__
-            )
+            os.path.abspath(__file__)
         )
     )
 )
 
-ENV_PATH = (
-    os.path.join(
-        ROOT_DIR,
-        ".env"
-    )
+ENV_PATH = os.path.join(
+    ROOT_DIR,
+    ".env"
 )
 
 load_dotenv(
@@ -33,27 +28,28 @@ load_dotenv(
 # =========================================================
 # PYTHONPATH
 # =========================================================
-if ROOT_DIR not in sys.path:
 
+if ROOT_DIR not in sys.path:
     sys.path.insert(
         0,
         ROOT_DIR
     )
 
-from src.engine.medic_engine import (
-    MedicEngine
-)
+from src.engine.medic_engine import MedicEngine
+from src.config.runtime_config import runtime_config
 
-from src.config.runtime_config import (
-    runtime_config
-)
+
+DEFAULT_ERROR = """
+Traceback (most recent call last):
+  File "main.py", line 11, in run_pipeline
+    result = utils.compute_core_logic(input_data)
+AttributeError: module 'utils' has no attribute 'compute_core_logic'
+"""
 
 
 def main():
 
-    print(
-        "=" * 50
-    )
+    print("=" * 50)
 
     print(
         "🎬 启动 "
@@ -66,30 +62,44 @@ def main():
         f"{runtime_config.test_repo_root}"
     )
 
-    print(
-        "=" * 50
-    )
+    print("=" * 50)
 
     if not os.path.exists(
         runtime_config.test_repo_root
     ):
-
         print(
             "❌ 错误: "
             "未找到测试仓库路径 "
             f"{runtime_config.test_repo_root}"
         )
-
         return
 
     engine = MedicEngine(
-        repo_root=(
-            runtime_config
-            .test_repo_root
-        )
+        repo_root=runtime_config.test_repo_root
     )
 
-    engine.run()
+    result = engine.run(
+        error_message=DEFAULT_ERROR
+    )
+
+    print("\n==============================")
+    print("最终状态摘要")
+    print("==============================")
+
+    print(
+        f"is_fixed = "
+        f"{result.get('is_fixed')}"
+    )
+
+    print(
+        f"repairable = "
+        f"{result.get('repairable')}"
+    )
+
+    print(
+        f"root_cause = "
+        f"{result.get('root_cause_class')}"
+    )
 
 
 if __name__ == "__main__":
