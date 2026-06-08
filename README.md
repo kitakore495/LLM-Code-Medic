@@ -52,6 +52,12 @@ LLM-Code-Medic/
 │   │   └── 🧪 executor.py              # 影子隔离沙箱执行器（组装虚拟工作区，执行原子化验证）
 │   │
 │   ├── 🧩 plugins/                     # 🧩 后置代码治理插件总线（涵盖风格、安全、单测补全）
+│   │   ├── base_plugin.py              # 插件生命周期行为契约抽象类
+│   │   ├── plugin_manager.py           # 集中式注册、管理并链式串行分发执行所有后置治理组件
+│   │   ├── style_plugin.py             # 对完成修复的代码域执行源码文本流规范化对齐
+│   │   ├── security_plugin.py          # 静态检索修复代码段中是否夹带二次高危模式或敏感硬编码
+│   │   ├── unit_test_plugin.py         # 识别代码变更点，驱动下属生成引擎自动补足高质量单测
+│   │   └── llm_test_generator.py       # 调度备用/主战 LLM 模型反向逆向编写物理 `test_*.py`
 │   │
 │   └── 📊 report/                      # 📈 自动化交付物度量与报告域
 │       └── 📄 report_generator.py      # 度量报告生成器（汇聚诊断度量与拦截记录，持久化 Markdown）

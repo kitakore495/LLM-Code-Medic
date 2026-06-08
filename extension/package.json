@@ -1,0 +1,50 @@
+{
+    "name": "llm-code-medic",
+
+    "displayName": "LLM Code Medic",
+
+    "description": "AI Code Repair Assistant",
+
+    "version": "0.0.1",
+
+    "publisher": "ray",
+
+    "engines": {
+        "vscode": "^1.90.0"
+    },
+
+    "categories": [
+        "Other"
+    ],
+
+    "activationEvents": [
+        "onCommand:llm-code-medic.diagnose",
+        "onCommand:llm-code-medic.repair"
+    ],
+
+    "main": "./out/extension.js",
+
+    "contributes": {
+        "commands": [
+            {
+                "command": "llm-code-medic.diagnose",
+                "title": "LLM Code Medic: Diagnose"
+            },
+            {
+                "command": "llm-code-medic.repair",
+                "title": "LLM Code Medic: Repair"
+            }
+        ]
+    },
+
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+
+    "devDependencies": {
+        "@types/node": "^22.15.0",
+        "@types/vscode": "^1.90.0",
+        "typescript": "^5.8.3"
+    }
+}

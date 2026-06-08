@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.pnp/
+.pnp.js
+
+# VS Code 插件开发特有
+out/                # TypeScript 编译输出目录
+dist/               # 打包产物
+*.vsix              # 编译出的插件安装包
+.vscode-test/       # 插件测试产生的临时环境
