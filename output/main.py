@@ -1,40 +1,17 @@
-from models.order import Order
-from models.product import Product
-from pipeline.order_pipeline import run_order_pipeline, run_report_pipeline
-from repository.product_repository import save_product
-
-
-def build_demo_data():
-    p1 = Product("P001", "Wireless Headphones", price=89.99, stock=50)
-    p2 = Product("P002", "USB-C Cable", price=12.99, stock=200)
-    save_product(p1)
-    save_product(p2)
-
-    order = Order(
-        order_id="ORD-2024-001",
-        user_id="USR-001",
-        items=[
-            {"product_id": "P001", "quantity": 2, "unit_price": 89.99},
-            {"product_id": "P002", "quantity": 3, "unit_price": 12.99},
-        ],
-    )
-    return order
-
+# tests/v3/main.py
+import utils
 
 def run_pipeline():
-    print("=== Warehouse Management System ===")
-    order = build_demo_data()
-
-    print(f"Processing order: {order.order_id}")
-    result = run_order_pipeline(order)
-    print(f"Order result: {result}")
-
-    print(f"Generating report for user: {order.user_id}")
-    report = run_report_pipeline(order.user_id)
-    print(report)
-
-    print("=== Pipeline Complete ===")
-
+    print("启动自动化数据处理流水线...")
+    
+    input_data = 100
+    current_weight = 10  # 传入 10 会导致 utils 内部触发除零错误
+    
+    # 修正调用：使用正确的函数名 execute_computation，并提供两个参数
+    print("[Main] 正在调用底层工具链...")
+    result = utils.execute_computation(input_data, current_weight)
+    
+    print(f"流水线运行成功！最终计算成果: {result}")
 
 if __name__ == "__main__":
     run_pipeline()
