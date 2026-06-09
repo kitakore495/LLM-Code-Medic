@@ -1,36 +1,14 @@
 import * as vscode from "vscode";
+import { fixCommand } from "./commands/fix";
 
-import {
-    diagnoseCommand
-} from "./commands/diagnose";
-
-import {
-    repairCommand
-} from "./commands/repair";
-
-export function activate(
-    context: vscode.ExtensionContext
-) {
-
-    const diagnoseDisposable =
-        vscode.commands.registerCommand(
-            "llm-code-medic.diagnose",
-            diagnoseCommand
-        );
-
-    const repairDisposable =
-        vscode.commands.registerCommand(
-            "llm-code-medic.repair",
-            repairCommand
-        );
-
-    context.subscriptions.push(
-        diagnoseDisposable
+export function activate(context: vscode.ExtensionContext) {
+    // 显式接收并透传 uri 参数
+    const disposable = vscode.commands.registerCommand(
+        "llm-code-medic.fix",
+        (uri?: vscode.Uri) => fixCommand(uri)
     );
 
-    context.subscriptions.push(
-        repairDisposable
-    );
+    context.subscriptions.push(disposable);
 }
 
 export function deactivate() {}

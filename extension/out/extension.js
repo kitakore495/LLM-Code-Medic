@@ -36,13 +36,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
-const diagnose_1 = require("./commands/diagnose");
-const repair_1 = require("./commands/repair");
+const fix_1 = require("./commands/fix");
 function activate(context) {
-    const diagnoseDisposable = vscode.commands.registerCommand("llm-code-medic.diagnose", diagnose_1.diagnoseCommand);
-    const repairDisposable = vscode.commands.registerCommand("llm-code-medic.repair", repair_1.repairCommand);
-    context.subscriptions.push(diagnoseDisposable);
-    context.subscriptions.push(repairDisposable);
+    // 显式接收并透传 uri 参数
+    const disposable = vscode.commands.registerCommand("llm-code-medic.fix", (uri) => (0, fix_1.fixCommand)(uri));
+    context.subscriptions.push(disposable);
 }
 function deactivate() { }
 //# sourceMappingURL=extension.js.map
