@@ -4,6 +4,7 @@
     "description": "One Click AI Code Repair",
     "version": "0.1.3",
     "publisher": "ray",
+    "icon": "media/icon.png",
     "repository": {
         "type": "git",
         "url": "https://github.com/kitakore495/LLM-Code-Medic"
