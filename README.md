@@ -165,16 +165,16 @@ DEEPSEEK_API_BASE=
 GEMINI_API_KEY=your_google_ai_studio_key
 
 # ⚙️ 核心架构双大模型（Dual-LLM）解耦路由
-# [战略诊断中枢角色] 推荐长链条高推理模型，如deepseek-R1
+# [战略诊断中枢角色] 推荐长链条高推理模型
 DIAGNOSE_PROVIDER=
 DIAGNOSE_MODEL=
 
-# [战术并行修复角色] 推荐高遵从度、极速模型,如deepseek-v4-flash
+# [战术并行修复角色] 推荐高遵从度、极速模型
 REPAIR_PROVIDER=
 REPAIR_MODEL=
 
 # [仅在模式 B：CLI 管道模式下生效] 自动化大规模跑分的目标仓库根目录
-TEST_REPO_ROOT=./tests/v3
+TEST_REPO_ROOT=./tests/benchmark_project_v1
 
 # 🧪 调试与安全网关模式
 DEBUG=True
@@ -211,7 +211,7 @@ python -m src.main
 
 ```
 
-系统将全自动提取 `.env` 中声明的 `TEST_REPO_ROOT` 路径，绘制项目雷达，调度状态机有向图进行最大次数为 3 次的循环闭环试炼，并将修复产物与反向生成的单元测试全量 атом 级沉淀到 `output/` 影子隔离区中。
+系统将全自动提取 `.env` 中声明的 `TEST_REPO_ROOT` 路径，绘制项目雷达，调度状态机有向图进行最大次数为 10 次（可在.env中手动修改）的循环闭环试炼，并将修复产物与反向生成的单元测试全量 атом 级沉淀到 `output/` 影子隔离区中。
 
 ---
 
