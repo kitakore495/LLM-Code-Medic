@@ -1,30 +1,30 @@
-# BUG-4: import 了不存在的 MAX_RETRY_COUNT（settings 里是 MAX_RETRIES）
-from config.settings import MAX_RETRY_COUNT   # BUG-4: should be MAX_RETRIES
-
-
-def validate_product(product) -> bool:
-    if not product:
-        raise ValueError("Product cannot be None")
-    if product.price <= 0:
-        raise ValueError(f"Invalid price: {product.price}")
-    if product.stock < 0:
-        raise ValueError(f"Invalid stock: {product.stock}")
+def validate_user(user):
+    if user is None:
+        raise ValueError("user not found")
     return True
 
 
-def validate_order(order) -> bool:
-    if not order:
-        raise ValueError("Order cannot be None")
-    if not order.items:
-        raise ValueError("Order must have at least one item")
-    if not order.user_id:
-        raise ValueError("Order must have a user_id")
+def validate_order(order):
+    if order is None:
+        raise ValueError("order is none")
+    if order.price <= 0:
+        raise ValueError("invalid price")
     return True
 
 
-def validate_quantity(quantity: int) -> bool:
-    if quantity <= 0:
-        raise ValueError(f"Quantity must be positive, got {quantity}")
-    if quantity > MAX_RETRY_COUNT * 100:
-        raise ValueError(f"Quantity {quantity} exceeds limit")
+def validate_payment(amount):
+    if amount <= 0:
+        raise ValueError("invalid payment")
+    return True
+
+
+def validate_address(address):
+    if not address:
+        raise ValueError("empty address")
+    return True
+
+
+def validate_email(email):
+    if "@" not in email:
+        raise ValueError("invalid email")
     return True

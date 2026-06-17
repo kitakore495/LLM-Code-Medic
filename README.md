@@ -90,10 +90,12 @@ LLM-Code-Medic/
 │
 ├── 🧪 output/                                  # 🧪 Shadow Workspace 影子隔离沙箱物理执行区与产物落地点
 └── 🎯 tests/                                   # 🎯 历代复杂漏洞工程评估基准库 (Benchmarks)
-    ├── 📁 benchmark_project_v2/                
-    ├── 📁 benchmark_project_v1/                  
-    ├── 📁 stress_pipeline/                     
-    └── 📁 v3/                                
+    ├── 📁 benchmark_project_v1/                
+    ├── 📁 benchmark_project_v2/                  
+    ├── 📁 benchmark_project_v3/  
+    ├── 📁 benchmark_project_v4/  
+    └── 📁 benchmark_project_v5/                 
+                                 
 
 ```
 
@@ -188,7 +190,7 @@ V5 系统支持以下**双轨分流运行模式**，无缝对齐不同工程场�
 如果你希望直接在编辑器中享受“指哪打哪”的一键外科手术级修复，请在项目根目录启动常驻本地分布式后端：
 
 ```bash
-uvicorn server.app:app --host 127.0.0.1 --port 8000 --reload
+uvicorn server.app:app --host 127.0.0.1 --port 8000 
 
 ```
 

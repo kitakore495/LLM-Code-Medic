@@ -1,41 +1,58 @@
-# BUG-8: save_order(order, order.user_id) 多传了参数，save_order 只接受 (order)
-from repository.order_repository import save_order, get_order, update_order
-from services.pricing_service import compute_order_price, estimate_shipping
-from services.inventory_service import get_product_info, check_availability
-from utils.validator import validate_order, validate_quantity
-from config.logger import logger
+from repository.user_repository import (
+    get_user
+)
+
+from repository.order_repository import (
+    save_order
+)
+
+from services.payment_service import (
+    process_payment
+)
+
+from services.notification_service import (
+    notify_user
+)
+
+from utils.validator import (
+    validate_user,
+    validate_order
+)
+
+from utils.calculator import (
+    calculate_total
+)
+
+from config.logger import (
+    logger
+)
 
 
-def submit_order(order) -> dict:
+def build_amount(price):
+    # Bug #2 根因：calculate_total 真实签名需要 3个参数 (price, tax, discount)
+    # 此处少传参数，会直接报 TypeError
+    total = calculate_total(price)
+    return total
+
+
+def submit_order(order):
+    logger.info("submit order")
     validate_order(order)
 
-    for item in order.items:
-        validate_quantity(item["quantity"])
-        if not check_availability(item["product_id"], item["quantity"]):
-            raise ValueError(f"Product {item['product_id']} has insufficient stock")
+    user = get_user(order.user_id)
+    validate_user(user)
 
-    order.total_amount = compute_order_price(order)
-    shipping = estimate_shipping(order.total_amount)
+    # 在此处中断，后续的 process_payment、save_order、notify_user 均不会执行
+    total = build_amount(order.price)
 
-    # BUG-8: save_order 只接受 (order)，多传了 user_id
-    save_order(order, order.user_id)
+    process_payment(order.user_id, total)
+    save_order(order)
+    notify_user(user)
 
-    logger.info(f"Order {order.order_id} submitted, total={order.total_amount:.2f}")
-    return {
-        "order_id": order.order_id,
-        "total": order.total_amount,
-        "shipping": shipping,
-        "status": order.status,
-    }
+    # 连锁错误源头：若侥幸避开异常，此处返回 None 会引发 main.py 报 'NoneType' object is not subscriptable
+    return None
 
 
-def cancel_order(order_id: str) -> None:
-    order = get_order(order_id)
+def cancel_order(order):
     order.mark_cancelled()
-    update_order(order)
-    logger.info(f"Order {order_id} cancelled")
-
-
-def get_order_detail(order_id: str) -> dict:
-    order = get_order(order_id)
-    return order.to_dict()
+    return True

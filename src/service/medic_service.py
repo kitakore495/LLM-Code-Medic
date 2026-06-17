@@ -81,14 +81,6 @@ class MedicService:
         )
 
 
-        print("\n==============================")
-        print("FINAL STATE KEYS")
-        print("==============================")
-
-        for key in sorted(final_state.keys()):
-            print(key)
-
-        print("==============================")
         return {
             "success": True,
 

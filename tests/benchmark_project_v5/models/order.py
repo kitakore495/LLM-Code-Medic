@@ -1,23 +1,40 @@
-class Order:
+from datetime import datetime
 
-    def __init__(self, user_id, product, price):
+
+class Order:
+    STATUS_PENDING = "pending"
+    STATUS_PAID = "paid"
+    STATUS_SHIPPED = "shipped"
+    STATUS_CANCELLED = "cancelled"
+
+    def __init__(self, order_id: str, user_id: str, items: list):
+        self.order_id = order_id
         self.user_id = user_id
-        self.product = product
-        self.price = price
-        self.status = "CREATED"
-        self.amount = price
+        self.items = items
+        self.status = self.STATUS_PENDING
+        self.total_amount = 0.0
+        self.created_at = datetime.now()
 
     def mark_paid(self):
-        self.status = "PAID"
+        if self.status != self.STATUS_PENDING:
+            raise ValueError(f"Cannot pay order in status: {self.status}")
+        self.status = self.STATUS_PAID
+
+    def mark_shipped(self):
+        if self.status != self.STATUS_PAID:
+            raise ValueError(f"Cannot ship order in status: {self.status}")
+        self.status = self.STATUS_SHIPPED
 
     def mark_cancelled(self):
-        self.status = "CANCELLED"
+        if self.status == self.STATUS_SHIPPED:
+            raise ValueError("Cannot cancel a shipped order")
+        self.status = self.STATUS_CANCELLED
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
+            "order_id": self.order_id,
             "user_id": self.user_id,
-            "product": self.product,
-            "price": self.price,
-            "amount": self.amount,
-            "status": self.status
+            "items": self.items,
+            "status": self.status,
+            "total_amount": self.total_amount,
         }

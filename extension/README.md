@@ -88,7 +88,7 @@ REPAIR_MODEL=
 在项目根目录执行：
 
 ```bash
-uvicorn server.app:app --reload
+uvicorn server.app:app
 ```
 
 启动成功后访问：

@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-06-17T17:25:33.673666",
+  "status": "FIXED",
+  "repair_attempts": 1,
+  "error_message": "Auto Repair",
+  "analysis": "BUG_INVENTORY:\n[SYMBOL_NOT_FOUND: add in utils] → CORRECT: add_numbers\n\nTRACEBACK:\nmain.py::import → utils.py::(symbol not found) | value='add' | responsibility=caller\n\nLOOP_CHECK:\nLOOP_CHECK_1: NO\nLOOP_CHECK_2: NO\nLOOP_CHECK_3: NO\nLOOP_VERDICT: [NO_LOOP_DETECTED]\n\nROOT_CAUSE_LAYER:\nmain.py:import:尝试导入 utils 模块中不存在的符号 add\n\nROOT_CAUSE_CLASS:\n[CALLER_VIOLATED]\n\nJUSTIFICATION:\nutils.py 明确提供 add_numbers 函数，但 main.py 错误地导入 add。callee (utils.py) 的合约（定义 add_numbers）是清晰且完整的，caller (main.py) 违反了该合约。导入失败属于 caller 侧的符号选择错误。\n\nREPAIR_SCOPE:\nmain.py: 修正 from utils import add 为 from utils import add_numbers，以匹配 utils 的实际导出。\n\nANTI_SHIM_CHECK:\nshim_with_default: N/A\nsilent_failure: N/A\nmagic_return: N/A\n\nTARGET_FILES: ['main.py']",
+  "target_files": [
+    "main.py"
+  ],
+  "verify_passed": true,
+  "semantic_gate_passed": true,
+  "semantic_gate_reason": "ok",
+  "policy_gate_passed": true,
+  "policy_gate_reason": "",
+  "patch_quality_passed": true,
+  "patch_quality_reason": "PASS",
+  "sandbox_stdout": "",
+  "sandbox_stderr": "",
+  "repair_history": [
+    "[LLM PATCH]\nattempt=0\nSELF_VERIFICATION:\nQ1: YES — The root cause is `main.py` attempting to import a non-existent symbol `add` from `utils`. The repair changes the import statement and the subsequent call to use the correct symbol `add_numbers`, directly addressing this root cause.\nQ2: NO — No numeric constants are introduced.\nQ3: NO — No try-except blocks are involved.\nQ4: NO — No shims are added.\nQ5: NO — No formulas, thresholds, or arithmetic constants are mutated.\nQ6: N/A — `LOOP_VERDICT` is `[NO_LOOP_DETECTED]`.\nQ7: YES — The changes are justified by `ROOT_CAUSE_CLASS: [CALLER_VIOLATED]` and `BUG_INVENTORY: [SYMBOL_NOT_FOUND: add in utils] → CORRECT: add_numbers`. The caller (`main.py`) was violating the contract of the callee (`utils.py`) by using the wrong symbol.\nQ8: YES — The import symbol `add` is changed to `add_numbers`, which is the `CORRECT` symbol specified in `BUG_INVENTORY`.\nQ9: NO — No literals are hardcoded.\nQ10: YES — The `BUG_INVENTORY` entry `[SYMBOL_NOT_FOUND: add in utils]` is fixed by changing `from utils import add` to `from utils import add_numbers` and changing `result = add(10, 20)` to `result = add_numbers(10, 20)`.\n\n<<<FILE_PATH: main.py>>>\n# tests/mock_repo/main.py\n\n# 模拟一个可能存在的导入问题\nfrom utils import add_numbers\n\ndef run_task():\n    print(\"正在启动任务...\")\n    # 错误：utils 模块里没有 add 函数，只有 add_numbers\n    result = add_numbers(10, 20)\n    print(f\"计算结果是: {result}\")\n\nif __name__ == \"__main__\":\n    run_task()\n<<<FILE_END>>>"
+  ]
+}

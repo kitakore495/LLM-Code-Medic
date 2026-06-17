@@ -1,31 +1,25 @@
-import datetime
+import logging
+from datetime import datetime
+
+LOG_LEVEL = logging.INFO
 
 
-class Logger:
+class AppLogger:
+    def __init__(self, name: str):
+        self._logger = logging.getLogger(name)
+        self._logger.setLevel(LOG_LEVEL)
 
-    def info(self, msg):
+    def info(self, msg: str):
+        self._logger.info(f"[{datetime.now().isoformat()}] INFO  | {msg}")
 
-        print(
-            f"[INFO]"
-            f"[{datetime.datetime.now()}]"
-            f" {msg}"
-        )
+    def warning(self, msg: str):
+        self._logger.warning(f"[{datetime.now().isoformat()}] WARN  | {msg}")
 
-    def warning(self, msg):
+    def error(self, msg: str):
+        self._logger.error(f"[{datetime.now().isoformat()}] ERROR | {msg}")
 
-        print(
-            f"[WARN]"
-            f"[{datetime.datetime.now()}]"
-            f" {msg}"
-        )
-
-    def error(self, msg):
-
-        print(
-            f"[ERROR]"
-            f"[{datetime.datetime.now()}]"
-            f" {msg}"
-        )
+    def debug(self, msg: str):
+        self._logger.debug(f"[{datetime.now().isoformat()}] DEBUG | {msg}")
 
 
-logger = Logger()
+logger = AppLogger("warehouse")
